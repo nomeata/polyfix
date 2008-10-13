@@ -17,6 +17,7 @@ import qualified Data.Map as M
 import Data.Generics
 import Data.Generics.Schemes
 import Data.Char
+import Data.Maybe
 
 newtype TypVar = TypVar Int deriving (Show, Eq, Typeable, Data)
 
@@ -40,13 +41,18 @@ parseType = either error id . parseType'
 --  Right (All (TypVar 3) (All (TypVar 4) (Arrow Int (Arrow (List (TEither (TVar (TypVar 3)) (TVar (TypVar 4)))) (TPair (TVar (TypVar 3)) (TVar (TypVar 4)))))))
 --
 parseType' :: (MonadError String t) => String -> t Typ
-parseType' s = case parseModule ("x :: " ++ s) of
-  ParseOk hsModule -> do
+parseType' s =  let (vars,types) = case span (/='.') s of
+			(v,'.':t) -> (words v, t)
+                        _         -> ([], s)
+	 	in case parseModule ("x :: " ++ types) of
+		  ParseOk hsModule -> do
 			hstype <- extractTheOneType hsModule
 			let varmap = createVarMap hstype
+			    specials = mapMaybe (flip M.lookup varmap) (map HsIdent vars)
 			typ <- runReaderT (simplifiyType hstype) varmap
- 			return (quantify typ)
-  ParseFailed l _  -> do throwError ("Parse error at (" ++ show (srcLine l) ++ ":" ++ show (srcColumn l) ++ ").")
+ 			return (quantify specials typ)
+		  ParseFailed l _  -> do
+			throwError ("Parse error at (" ++ show (srcLine l) ++ ":" ++ show (srcColumn l) ++ ").")
 
 extractTheOneType :: (MonadError String m) => HsModule -> m HsType
 extractTheOneType (HsModule _ _ _ _ [HsTypeSig _ _ (HsQualType [] t)]) = return t
@@ -78,5 +84,7 @@ simplifiyType (HsTyApp (HsTyCon (Special HsListCon)) t)
 simplifiyType t
 				= throwError ("Unsupported type " ++ show t)
 
-quantify :: Typ -> Typ
-quantify t = foldr All t (nub (listify (\(_::TypVar) -> True) t))
+quantify :: [TypVar] -> Typ -> Typ
+quantify special t = foldr all t (nub (listify (\(_::TypVar) -> True) t))
+  where all v | v `elem` special = All v
+              | otherwise        = AllStar v
