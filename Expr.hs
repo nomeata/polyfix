@@ -96,66 +96,70 @@ showIntercalate i [x] = x
 showIntercalate i (x:xs) = x . i . showIntercalate i xs
 
 instance Show BoolExpr where
-	showsPrec d (Equal e1 e2) = showParen (d>8) $
-				    showsPrec 9 e1 .
-				    showString " == " .
-				    showsPrec 9 e2 
-	showsPrec d (Pairwise v1 v2 be e1 e2) =
-			showParen (d>10) $
-			showString "allZipWith " .
-			showParen True ( 
-				showString "\\" .
-				showString v1 .
-				showChar ' ' .
-				showString v2 . 
-				showString " -> " .
-				showsPrec 0 be
-			) .
-			showChar ' ' .
-			showsPrec 11 e1 .
-			showChar ' ' .
-			showsPrec 11 e2
-	showsPrec d (Condition v1 v2 t be1 be2) = 
-			showParen (d>6) $
-			showString "forall " . 
-			showString v1 . 
-			showString " :: " .
-			arrowInstType False t .
-			showString ", " .
-			showString v2 . 
-			showString " :: " .
-			arrowInstType True t .
-			showString ".\n" .
-			showsPrec 9 be1 .
-			showString " ==> " .
-			showsPrec 6 be2
-	showsPrec d (UnCond v1 b t be1) = 
-			showParen (d>6) $
-			showString "forall " . 
-			showString v1 . 
-			showString " :: " .
-			arrowInstType b t .
-			showString ".\n" .
-			showsPrec 6 be1
-	showsPrec d (TypeVarInst i be) = 
-			showParen (d>6) $
-			showString "forall types t" .
-			shows (2*i-1) .
-			showString ", t" .
-			shows (2*i) . 
-			showString ", function g" .
-			shows i .
-			showString " :: t" .
-			shows (2*i-1) .
-			showString " -> t" .
-			shows (2*i) . 
-			showString ".\n" .
-			showsPrec 6 be
+	show (Equal e1 e2) = showsPrec 9 e1 $
+			     showString " == " $
+			     showsPrec 9 e2 ""
+	show (Pairwise v1 v2 be e1 e2) =
+			"allZipWith " ++
+			"( " ++
+			"\\" ++
+			v1 ++
+			" " ++
+			v2 ++
+			" -> " ++
+			show be ++
+			")" ++
+			" " ++
+			showsPrec 11 e1 "" ++
+			" " ++
+			showsPrec 11 e2 ""
+	show (Condition v1 v2 t be1 be2) = 
+			"forall " ++
+			v1 ++
+			" :: " ++
+			arrowInstType False t ++
+			", " ++
+			v2 ++
+			" :: " ++
+			arrowInstType True t ++
+			".\n" ++
+			indent 2 (show be1) ++
+			"==>\n" ++
+			indent 2 (show be2)
+	show (UnCond v1 b t be1) = 
+			"forall " ++
+			v1 ++
+			" :: " ++
+			arrowInstType b t ++
+			".\n" ++
+			indent 2 (show be1)
+	show (TypeVarInst i be) = 
+			"forall types t" ++
+			show (2*i-1) ++
+			", t" ++
+			show (2*i) ++
+			", function g" ++
+			show i ++
+			" :: t" ++
+			show (2*i-1) ++
+			" -> t" ++
+			show (2*i) ++ 
+			".\n" ++
+			indent 2 (show be)
 
-arrowInstType :: Bool -> Typ -> ShowS
-arrowInstType b Int			= showString "Int" 
-arrowInstType False (TVar (TypVar i))	= showString "t" .  shows (2*i-1)
-arrowInstType True (TVar (TypVar i))	= showString "t" .  shows (2*i)
-arrowInstType b (Arrow t1 t2)    	= arrowInstType b t1 .
-					  showString " -> " .
-					  arrowInstType b t2
+indent n = unlines . map (replicate n ' ' ++) . lines
+
+arrowInstType :: Bool -> Typ -> String
+arrowInstType b = ait 0
+  where 
+	ait _ Int			= "Int" 
+	ait _ (TVar (TypVar i)) | not b	= "t" ++  show (2*i-1)
+                                |     b = "t" ++  show (2*i)
+	ait d (Arrow t1 t2)    		= paren (d>9) $ 
+						  ait 10 t1 ++ " -> " ++ ait 9 t2 
+	ait d (List t)          	= "[" ++ ait 0 t ++ "]"
+	ait d (TEither t1 t2)        	= "Either " ++ ait 11 t1 ++ 
+                                                " " ++ ait 11 t2
+	ait d (TPair t1 t2)        	= "(" ++ ait 0 t1 ++ ", " ++ ait 0 t2 ++ ")"
+
+paren b p   =  if b then "(" ++ p ++ ")" else p
