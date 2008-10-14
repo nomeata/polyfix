@@ -5,6 +5,7 @@ module SimpleFT where
 import ParseType
 import Expr
 import Control.Monad.Reader
+import Data.List
 
 test = putStrLn . show . freeTheorem . parseType
 
@@ -12,7 +13,7 @@ freeTheorem t = flip runReader freeVars $
 			freeTheorem' (typedLeft  (Var "f") (unquantify t))
 				     (typedRight (Var "f") (unquantify t))
                                      t
-freeVars = (map (:"") ['a'..])
+freeVars = map (:"") (delete 'f' ['a'..])
 
 
 freeTheorem' :: TypedExpr -> TypedExpr -> Typ -> Reader [String] BoolExpr
