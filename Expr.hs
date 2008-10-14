@@ -2,6 +2,7 @@
 module Expr where
 
 import Data.List
+import Data.Maybe
 import ParseType
 
 import Data.Generics hiding (typeOf)
@@ -26,9 +27,8 @@ data Expr
             deriving (Eq, Typeable, Data)
 
 data BoolExpr 
-	= BETrue
-	| Equal Expr Expr
-	| And BoolExpr BoolExpr
+	= Equal Expr Expr
+	| And [BoolExpr] -- And [] is True
 	| AllZipWith TypedExpr TypedExpr BoolExpr Expr Expr
 	| Condition [TypedExpr] BoolExpr BoolExpr
 	| UnpackPair TypedExpr TypedExpr TypedExpr BoolExpr
@@ -56,6 +56,13 @@ amap tf tl | Arrow t1 t2 <- typeOf tf
 	     in app (app tMap tf) tl
 amap tf tl | otherwise = error "Type error in map"
 
+aand (And xs) (And ys) = And (xs  ++ ys)
+aand (And xs) y        = And (xs  ++ [y])
+aand x        (And ys) = And ([x] ++ ys)
+aand x        y        = And ([x,y])
+
+beTrue = And []
+
 -- | Is inside the term a definition for the variable?
 defFor :: TypedExpr -> BoolExpr -> Maybe TypedExpr
 defFor tv be | Just e' <- defFor' (unTypeExpr tv) be
@@ -64,10 +71,8 @@ defFor tv be | Just e' <- defFor' (unTypeExpr tv) be
 	
 defFor' v (e1 `Equal` e2) | v == e1                 = Just e2
                           | v == e2                 = Just e1
-defFor' v (e1 `And` e2)   | Just d  <- defFor' v e1
-		          , Nothing <- defFor' v e2 = Just d
-defFor' v (e1 `And` e2)   | Just d  <- defFor' v e2
-		          , Nothing <- defFor' v e1 = Just d
+defFor' v (And es)        | [d]  <- mapMaybe (defFor' v) es -- exactly one definition
+						    = Just d
 defFor' _ _                                         = Nothing
 
 app te1 te2 | Arrow t1 t2 <- typeOf te1
@@ -83,9 +88,9 @@ app te1 te2 | otherwise                          = error $ "Type mismatch in app
 unCond v (Equal l r) | (Just l') <- isApplOn (unTypeExpr v) l 
 	             , (Just r') <- isApplOn (unTypeExpr v) r = 
 	if v `occursIn` l' || v `occursIn` r'
-	then Condition [v] BETrue (Equal l' r')
+	then Condition [v] beTrue (Equal l' r')
 	else (Equal l' r')
-unCond v e = Condition [v] BETrue e
+unCond v e = Condition [v] beTrue e
 
 lambda tv e = TypedExpr inner (Arrow (typeOf tv) (typeOf e))
   where inner | (Just e') <- isApplOn (unTypeExpr tv) (unTypeExpr e)
@@ -158,9 +163,8 @@ instance Show BoolExpr where
 	show (Equal e1 e2) = showsPrec 9 e1 $
 			     showString " == " $
 			     showsPrec 9 e2 ""
-	show (And be1 be2) = show be1 ++
-			     " && " ++
-			     show be2 
+	show (And [])      = show "True"
+        show (And bes)     = intercalate " && " $ map show bes
 	show (AllZipWith v1 v2 be e1 e2) =
 			"allZipWith " ++
 			"( " ++
@@ -179,7 +183,7 @@ instance Show BoolExpr where
 			"forall " ++
 			intercalate ", " (map show tvars) ++
 			".\n" ++
-			(if be1 /= BETrue then indent 2 (show be1) ++ "==>\n" else "") ++
+			(if be1 /= beTrue then indent 2 (show be1) ++ "==>\n" else "") ++
 			indent 2 (show be2)
 	show (UnpackPair v1 v2 e be) = 
 			"let (" ++

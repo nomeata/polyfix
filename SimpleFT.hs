@@ -77,7 +77,7 @@ freeTheorem' e1 e2 t@(TPair t1 t2)
 			(TypedExpr x2 tx2)
 			(TypedExpr y2 ty2)
 			t2
-		return $ And concl1 concl2
+		return $ aand concl1 concl2
 	| otherwise
 	   = getVars 4 $ \[x1',x2',y1',y2'] -> do
 		let x1 = TypedExpr (Var x1') tx1
@@ -88,7 +88,7 @@ freeTheorem' e1 e2 t@(TPair t1 t2)
 		concl2 <- freeTheorem' x2 y2 t2
 		return $ unpackPair x1 x2 e1 $
 				unpackPair y1 y2 e2  $
-					And concl1 concl2
+					aand concl1 concl2
  where (TPair tx1 tx2) = typeOf e1
        (TPair ty1 ty2) = typeOf e2
 
