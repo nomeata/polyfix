@@ -37,8 +37,24 @@ data BoolExpr
 
 -- Smart constructors
 
+-- | Try eta reduction
 equal te1 te2 | typeOf te1 /= typeOf te2 = error "Type mismatch in equal"
-              | otherwise                = Equal (unTypeExpr te1) (unTypeExpr te2)
+              | otherwise                = equal' (unTypeExpr te1) (unTypeExpr te2)
+
+equal' e1 e2  | (Just (lf,lv)) <- isFunctionApplication e1
+              , (Just (rf,rv)) <- isFunctionApplication e2
+              , lv == rv 
+	                                 = equal' lf rf
+	      -- This makes it return True...
+	      | e1 == e2                 = beTrue
+              | otherwise                = Equal e1 e2
+
+isFunctionApplication (App f e') | (Just (inner,v)) <- isFunctionApplication e'
+                                 = Just (conc f inner, v)
+                                 | otherwise
+                                 = Just (Conc [f], e')
+isFunctionApplication _          = Nothing
+
 
 unpackPair = UnpackPair
 
@@ -57,8 +73,8 @@ amap tf tl | Arrow t1 t2 <- typeOf tf
 	     in app (app tMap tf) tl
 amap tf tl | otherwise = error "Type error in map"
 
--- Float out foralls
-aand (Condition vars beTrue concl) be = Condition vars beTrue (aand concl be)
+-- Float out foralls without condition
+aand (Condition vars beTrue concl) be = condition vars beTrue (aand concl be)
 aand (And xs) (And ys) = And (xs  ++ ys)
 aand (And xs) y        = And (xs  ++ [y])
 aand x        (And ys) = And ([x] ++ ys)
@@ -68,19 +84,33 @@ beTrue = And []
 
 -- | Is any var (or part of var) defined in cond, and can be replaced in concl?
 condition :: [TypedExpr] -> BoolExpr -> BoolExpr -> BoolExpr
-condition vars cond concl | ((vars',cond',concl'):_) <- mapMaybe try vars
+-- empty condition
+condition [] cond concl   | cond == beTrue
+                          = concl
+-- float out conditions on the right
+condition vars cond (Condition vars' cond' concl')
+			  = condition (vars ++ vars') (cond `aand` cond') concl'
+
+-- Try to find variables that are functions of other variables, and remove them
+condition vars cond concl | True -- set to false to disable
+                          , ((vars',cond',concl'):_) <- mapMaybe try vars
 			  = condition vars' cond' concl'
-                          | otherwise
-                          = Condition vars cond concl
-  where try v = do subst <- findReplacer v cond --Maybe Monad
-                   return (delete v vars, subst cond, subst concl)
+  where try v | Just subst <- findReplacer v cond
+              = Just (delete v vars, subst cond, subst concl)
+              | not (unTypeExpr v `occursIn` cond || unTypeExpr v `occursIn` concl)
+              = Just (delete v vars, cond, concl)
+              | otherwise
+              = Nothing
+
+-- Nothing left to optizmize
+condition vars cond concl = Condition vars cond concl
 
 -- | Replaces a Term in a BoolExpr
 replaceTermBE :: Expr -> Expr -> BoolExpr -> BoolExpr
 replaceTermBE d r = go
   where go (e1 `Equal` e2) | d == e1 && r == e2 = beTrue
                            | d == e2 && r == e1 = beTrue
-                           | otherwise          = go' e1 `Equal` go' e2
+                           | otherwise          = go' e1 `equal'` go' e2
         go (And es)        = foldr aand beTrue (map go es)
         go (AllZipWith v1 v2 be e1 e2) 
                            = AllZipWith v1 v2 (go be) (go' e1) (go' e2)
@@ -138,12 +168,14 @@ app te1 te2 | Arrow t1 t2 <- typeOf te1
 app te1 te2 | otherwise                          = error $ "Type mismatch in app: " ++
                                                            show te1 ++ " " ++ show te2
 
+{- dead code
 unCond v (Equal l r) | (Just l') <- isApplOn (unTypeExpr v) l 
 	             , (Just r') <- isApplOn (unTypeExpr v) r = 
 	if v `occursIn` l' || v `occursIn` r'
 	then Condition [v] beTrue (Equal l' r')
 	else (Equal l' r')
 unCond v e = Condition [v] beTrue e
+-}
 
 lambda tv e = TypedExpr inner (Arrow (typeOf tv) (typeOf e))
   where inner | (Just e') <- isApplOn (unTypeExpr tv) (unTypeExpr e)
@@ -152,7 +184,10 @@ lambda tv e = TypedExpr inner (Arrow (typeOf tv) (typeOf e))
 	      | tv == e   = Conc []
               | otherwise = Lambda tv (unTypeExpr e)
 
-conc f (Conc fs) = Conc (f:fs)
+conc (Conc xs) (Conc ys) = Conc (xs  ++ ys)
+conc (Conc xs)  y        = Conc (xs  ++ [y])
+conc x         (Conc ys) = Conc ([x] ++ ys)
+conc x          y        = Conc ([x,y])
 
 -- Helpers
 
@@ -216,7 +251,7 @@ instance Show BoolExpr where
 	show (Equal e1 e2) = showsPrec 9 e1 $
 			     showString " == " $
 			     showsPrec 9 e2 ""
-	show (And [])      = show "True"
+	show (And [])      = "True"
         show (And bes)     = intercalate " && " $ map show bes
 	show (AllZipWith v1 v2 be e1 e2) =
 			"allZipWith " ++
