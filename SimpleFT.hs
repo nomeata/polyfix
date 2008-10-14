@@ -30,8 +30,6 @@ freeTheorem' e1 e2 (Arrow t1 t2) | isTuple t1 = do
 	-- the inner variables names
 	fillTuplevars False t1 $ \tve1 -> 
 		fillTuplevars True t1 $ \tve2 ->  do
-			let ve1 = unTypeExpr tve1
-                            ve2 = unTypeExpr tve2
 			cond  <- freeTheorem' (tve1) (tve2) t1
 			concl <- freeTheorem' (app e1 tve1) (app e2 tve2) t2
 			return $ Condition [tve1, tve2] cond concl
