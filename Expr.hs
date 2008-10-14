@@ -43,9 +43,9 @@ equal te1 te2 | typeOf te1 /= typeOf te2 = error "Type mismatch in equal"
 unpackPair = UnpackPair
 
 allZipWith :: TypedExpr -> TypedExpr -> BoolExpr -> TypedExpr -> TypedExpr -> BoolExpr
-allZipWith v1 v2 rel e1 e2 | Just (v1', _) <- defFor v1 rel =
+allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
 				e1 `equal` amap (lambda v2 v1') e2
-                           | Just (v2', _) <- defFor v2 rel =
+                           | Just v2' <- defFor v2 rel =
 				amap (lambda v1 v2') e1 `equal` e2
                            | otherwise =
 				AllZipWith v1 v2 rel (unTypeExpr e1) (unTypeExpr e2)
@@ -53,10 +53,12 @@ allZipWith v1 v2 rel e1 e2 | Just (v1', _) <- defFor v1 rel =
 amap tf tl | Arrow t1 t2 <- typeOf tf
            , List t      <- typeOf tl
            , t1 == t
-           = let tMap = TypedExpr Map (Arrow (List t1) (List t2))
+           = let tMap = TypedExpr Map (Arrow (Arrow t1 t2) (Arrow (List t1) (List t2)))
 	     in app (app tMap tf) tl
 amap tf tl | otherwise = error "Type error in map"
 
+-- Float out foralls
+aand (Condition vars beTrue concl) be = Condition vars beTrue (aand concl be)
 aand (And xs) (And ys) = And (xs  ++ ys)
 aand (And xs) y        = And (xs  ++ [y])
 aand x        (And ys) = And ([x] ++ ys)
@@ -70,8 +72,8 @@ condition vars cond concl | ((vars',cond',concl'):_) <- mapMaybe try vars
 			  = condition vars' cond' concl'
                           | otherwise
                           = Condition vars cond concl
-  where try v = do (def,del) <- defFor v cond --Maybe Monad
-                   return (delete v vars, del cond, del concl)
+  where try v = do subst <- findReplacer v cond --Maybe Monad
+                   return (delete v vars, subst cond, subst concl)
 
 -- | Replaces a Term in a BoolExpr
 replaceTermBE :: Expr -> Expr -> BoolExpr -> BoolExpr
@@ -85,34 +87,43 @@ replaceTermBE d r = go
 	go (Condition vs cond concl)
 			   = condition vs (go cond) (go concl)
 	go (UnpackPair v1 v2 e be)
-			   = unpackPair v1 v2 (goT e) (go be)
+			   = unpackPair v1 v2 (go' e) (go be)
 	go (TypeVarInst _ _) = error "TypeVarInst not expected here"
-	goT = replaceTypedExpr d r
+	go' :: Data a => a -> a
 	go' = replaceExpr d r
 
-replaceExpr :: Expr -> Expr -> Expr -> Expr
+replaceExpr :: Data a => Expr -> Expr -> a -> a
 replaceExpr d r = everywhere (mkT go)
   where go e | e == d    = r 
              | otherwise = e
 
-replaceTypedExpr :: Expr -> Expr -> TypedExpr -> TypedExpr
-replaceTypedExpr d r = everywhere (mkT go)
-  where go e | unTypeExpr e == d = e { unTypeExpr = r }
-             | otherwise         = e
+-- | Is inside the term a definition for the variable?
+findReplacer :: TypedExpr -> BoolExpr -> Maybe (BoolExpr -> BoolExpr)
+findReplacer tv be = findReplacer' (unTypeExpr tv) be
+	
+-- | Find a definition, and return a substitution
+findReplacer' :: Expr -> BoolExpr -> Maybe (BoolExpr -> BoolExpr)
+-- For combined types, look up the components
+findReplacer' (Pair x y) e | Just (delX) <- findReplacer' x e
+                           , Just (delY) <- findReplacer' y e
+                    = Just (delX . delY)
+-- Find the definition
+findReplacer' e (e1 `Equal` e2) | e == e1    = Just (replaceTermBE e e2)
+                                | e == e2    = Just (replaceTermBE e e1)
+findReplacer' e (And es)        = listToMaybe (mapMaybe (findReplacer' e) es)
+				  -- assuming no two definitions can exist
+findReplacer' _ _               = Nothing
 
 -- | Is inside the term a definition for the variable?
-defFor :: TypedExpr -> BoolExpr -> Maybe (TypedExpr, BoolExpr -> BoolExpr)
-defFor tv be | Just (e', delDef) <- defFor' (unTypeExpr tv) be
-                         = Just (TypedExpr e' (typeOf tv), delDef)
+defFor :: TypedExpr -> BoolExpr -> Maybe (TypedExpr)
+defFor tv be | Just (e') <- defFor' (unTypeExpr tv) be
+                         = Just (TypedExpr e' (typeOf tv))
              | otherwise = Nothing
 	
 -- | Find a definition, and return it along the definition remover
-defFor' :: Expr -> BoolExpr -> Maybe (Expr, BoolExpr -> BoolExpr)
-defFor' (Pair x y) e | Just (dx, delX) <- defFor' x e
-                     , Just (dy, delY) <- defFor' y e
-                    = Just ((Pair dx dy), delX . delY)
-defFor' e (e1 `Equal` e2) | e == e1                 = Just (e2, replaceTermBE e e2)
-                          | e == e2                 = Just (e1, replaceTermBE e e1)
+defFor' :: Expr -> BoolExpr -> Maybe (Expr)
+defFor' e (e1 `Equal` e2) | e == e1                 = Just (e2)
+                          | e == e2                 = Just (e1)
 defFor' e (And es)        | [d]  <- mapMaybe (defFor' e) es -- exactly one definition
 						    = Just d
 defFor' _ _                                         = Nothing
