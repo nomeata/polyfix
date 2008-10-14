@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts, PatternSignatures, DeriveDataTypeable #-}
 module ParseType (
 	  parseType
+	, instType
+	, unquantify
 	, TypVar(..)
 	, Typ(..)
 	) where
@@ -19,7 +21,12 @@ import Data.Generics.Schemes
 import Data.Char
 import Data.Maybe
 
-newtype TypVar = TypVar Int deriving (Show, Eq, Typeable, Data)
+data TypVar = TypVar Int        -- alpha, beta etc.
+            | TypInst Int Bool  -- t1,t2 etc
+	deriving (Show, Eq, Typeable, Data)
+
+instType :: Bool -> Typ -> Typ
+instType rightSide typ = everywhere (mkT (\(TypVar i) -> TypInst i rightSide)) typ
 
 data Typ    = TVar    TypVar
             | Arrow   Typ     Typ
@@ -31,6 +38,10 @@ data Typ    = TVar    TypVar
             | TPair    Typ     Typ
             | TEither  Typ     Typ
             deriving (Show, Eq, Typeable, Data)
+
+unquantify (All     _ t) = unquantify t
+unquantify (AllStar _ t) = unquantify t
+unquantify t             = t
 
 parseType = either error id . parseType'
 

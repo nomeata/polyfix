@@ -1,91 +1,115 @@
-{-# LANGUAGE PatternGuards  #-}
+{-# LANGUAGE PatternGuards, DeriveDataTypeable   #-}
 module Expr where
 
 import Data.List
 import ParseType
 
+import Data.Generics hiding (typeOf)
+import Data.Generics.Schemes
+
 data TypedExpr = TypedExpr
 	{ unTypeExpr	:: Expr
 	, typeOf	:: Typ
-	, onRightSide	:: Bool
-	} deriving (Eq)
+	} deriving (Eq, Typeable, Data)
+
+typedLeft, typedRight :: Expr -> Typ -> TypedExpr
+typedLeft  e t = TypedExpr e (instType False t)
+typedRight e t = TypedExpr e (instType True t)
 
 data Expr
 	= Var String
 	| App Expr Expr
 	| Conc [Expr] -- Conc [] is Id
-	| Lambda String Expr
+	| Lambda TypedExpr Expr
 	| Pair Expr Expr
 	| Map
-            deriving (Eq)
+            deriving (Eq, Typeable, Data)
 
 data BoolExpr 
 	= BETrue
 	| Equal Expr Expr
 	| And BoolExpr BoolExpr
-	| AllZipWith String String BoolExpr Expr Expr
-	| Condition TypedExpr TypedExpr  BoolExpr BoolExpr
-	| UnpackPair String String Expr Bool Typ BoolExpr
-	| UnCond String Bool Typ BoolExpr
+	| AllZipWith TypedExpr TypedExpr BoolExpr Expr Expr
+	| Condition [TypedExpr] BoolExpr BoolExpr
+	| UnpackPair TypedExpr TypedExpr TypedExpr BoolExpr
 	| TypeVarInst Int BoolExpr
-            deriving (Eq)
+            deriving (Eq, Typeable, Data)
 
 -- Smart constructors
 
--- Left or right side of a relation (affects type variables)
-typedLeft e t = TypedExpr e t False
-typedRight e t = TypedExpr e t True
-
-equal = Equal
+equal te1 te2 | typeOf te1 /= typeOf te2 = error "Type mismatch in equal"
+              | otherwise                = Equal (unTypeExpr te1) (unTypeExpr te2)
 
 unpackPair = UnpackPair
 
 allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
-				e1 `equal` app (app Map (lambda v2 v1')) e2
+				e1 `equal` amap (lambda v2 v1') e2
                            | Just v2' <- defFor v2 rel =
-				app (app Map (lambda v1 v2')) e1 `equal` e2
+				amap (lambda v1 v2') e1 `equal` e2
                            | otherwise =
-				AllZipWith v1 v2 rel e1 e2
+				AllZipWith v1 v2 rel (unTypeExpr e1) (unTypeExpr e2)
+
+amap tf tl | Arrow t1 t2 <- typeOf tf
+           , List t      <- typeOf tl
+           , t1 == t
+           = let tMap = TypedExpr Map (Arrow (List t1) (List t2))
+	     in app (app tMap tf) tl
+amap tf tl | otherwise = error "Type error in map"
 
 -- | Is inside the term a definition for the variable?
-defFor v (e1 `Equal` e2) | (Var v) == e1 = Just e2
-                         | (Var v) == e2 = Just e1
-defFor v (e1 `And` e2)   | Just d  <- defFor v e1
-		         , Nothing <- defFor v e2 = Just d
-defFor v (e1 `And` e2)   | Just d  <- defFor v e2
-		         , Nothing <- defFor v e1 = Just d
-defFor _ _                               = Nothing
+defFor :: TypedExpr -> BoolExpr -> Maybe TypedExpr
+defFor tv be | Just e' <- defFor' (unTypeExpr tv) be
+                         = Just (TypedExpr e' (typeOf tv))
+             | otherwise = Nothing
+	
+defFor' v (e1 `Equal` e2) | v == e1                 = Just e2
+                          | v == e2                 = Just e1
+defFor' v (e1 `And` e2)   | Just d  <- defFor' v e1
+		          , Nothing <- defFor' v e2 = Just d
+defFor' v (e1 `And` e2)   | Just d  <- defFor' v e2
+		          , Nothing <- defFor' v e1 = Just d
+defFor' _ _                                         = Nothing
 
-app Map (Conc []) = Conc []
-app (Conc []) v   = v
-app f v           = App f v
+app te1 te2 | Arrow t1 t2 <- typeOf te1
+	    , t3          <- typeOf te2 
+            , t1 == t3 
+            = TypedExpr (app' (unTypeExpr te1) (unTypeExpr te2)) t2
+ where app' Map (Conc []) = Conc []
+       app' (Conc []) v   = v
+       app' f v           = App f v
+app te1 te2 | otherwise                          = error $ "Type mismatch in app: " ++
+                                                           show te1 ++ " " ++ show te2
 
-unCond v b t (Equal l r) | (Just l') <- isApplOn v l 
-	                 , (Just r') <- isApplOn v r = 
-	if hasVar v l' || hasVar v r'
-	then UnCond v b t (Equal l' r')
+unCond v (Equal l r) | (Just l') <- isApplOn (unTypeExpr v) l 
+	             , (Just r') <- isApplOn (unTypeExpr v) r = 
+	if v `occursIn` l' || v `occursIn` r'
+	then Condition [v] BETrue (Equal l' r')
 	else (Equal l' r')
-unCond v b t e = UnCond v b t e
+unCond v e = Condition [v] BETrue e
 
-lambda v e | (Just e') <- isApplOn v e, not (hasVar v e') = e'
-	   | Var v == e                                   = Conc []
-           | otherwise                                    = Lambda v e
-
+lambda tv e = TypedExpr inner (Arrow (typeOf tv) (typeOf e))
+  where inner | (Just e') <- isApplOn (unTypeExpr tv) (unTypeExpr e)
+	      , not (unTypeExpr tv `occursIn` e')
+                          = e'
+	      | tv == e   = Conc []
+              | otherwise = Lambda tv (unTypeExpr e)
 
 conc f (Conc fs) = Conc (f:fs)
 
 -- Helpers
 
-isApplOn v (Var _)                                         = Nothing
-isApplOn v (App f (Var v')) | v == v'                      = Just (Conc [f])
-isApplOn v (App f e)        | (Just inner) <- isApplOn v e = Just (conc f inner)
-isApplOn _ _                                               = Nothing
+isApplOn e e'         | e == e'                       = Nothing
+isApplOn e (App f e') | e == e'                       = Just (Conc [f])
+isApplOn e (App f e') | (Just inner) <- isApplOn e e' = Just (conc f inner)
+isApplOn _ _                                          = Nothing
 
 hasVar v (Var v')     = v == v'
 hasVar v (App e1 e2)  = hasVar v e1 && hasVar v e2
 hasVar v (Conc es)    = any (hasVar v) es
 hasVar v (Lambda _ e) = hasVar v e
 hasVar v Map          = False
+
+e `occursIn` e'       = not (null (listify (==e) e'))
 
 isTuple (TPair _ _) = True
 isTuple _           = False
@@ -108,11 +132,11 @@ instance Show Expr where
 	showsPrec d (Conc [e])  = showsPrec d e
 	showsPrec d (Conc es)   = showParen (d>9) $
 		showIntercalate (showString " . ") (map (showsPrec 10) es)
-	showsPrec d (Lambda v e) = showParen True $ 
-				   showString "\\" .
-                                   showString v .
-                                   showString " -> ".
-			           showsPrec 0 e 
+	showsPrec d (Lambda tv e) = showParen True $ 
+				    showString "\\" .
+                                    showsPrec 0 tv .
+                                    showString " -> ".
+			            showsPrec 0 e 
 	showsPrec _ (Pair e1 e2) = showParen True $ 
 			           showsPrec 0 e1 .
 				   showString "," .
@@ -124,11 +148,11 @@ showIntercalate i [x] = x
 showIntercalate i (x:xs) = x . i . showIntercalate i xs
 
 instance Show TypedExpr where
-	showsPrec d (TypedExpr e t rightSide) = 
+	showsPrec d (TypedExpr e t) = 
 		showParen (d>10) $
 			showsPrec 0 e .
 			showString " :: " .
-			showString (arrowInstType rightSide t)
+			showString (showTypePrec 0 t)
 
 instance Show BoolExpr where
 	show (Equal e1 e2) = showsPrec 9 e1 $
@@ -141,9 +165,9 @@ instance Show BoolExpr where
 			"allZipWith " ++
 			"( " ++
 			"\\" ++
-			v1 ++
+			showsPrec 11 v1 "" ++
 			" " ++
-			v2 ++
+			showsPrec 11 v2 "" ++
 			" -> " ++
 			show be ++
 			")" ++
@@ -151,32 +175,21 @@ instance Show BoolExpr where
 			showsPrec 11 e1 "" ++
 			" " ++
 			showsPrec 11 e2 ""
-	show (Condition tv1 tv2 be1 be2) = 
+	show (Condition tvars be1 be2) = 
 			"forall " ++
-			showsPrec 0 tv1 "" ++
-			", " ++
-			showsPrec 0 tv2 "" ++
+			intercalate ", " (map show tvars) ++
 			".\n" ++
 			(if be1 /= BETrue then indent 2 (show be1) ++ "==>\n" else "") ++
 			indent 2 (show be2)
-	show (UnpackPair v1 v2 e b t be) = 
+	show (UnpackPair v1 v2 e be) = 
 			"let (" ++
-			v1 ++
+			showsPrec 0 v1 "" ++
 			"," ++
-			v2 ++
+			showsPrec 0 v2 "" ++
 			") = " ++
 			showsPrec 0 e "" ++
-			" :: " ++
-			arrowInstType b t ++
 			" in\n" ++
 			indent 2 (show be)
-	show (UnCond v1 b t be1) = 
-			"forall " ++
-			v1 ++
-			" :: " ++
-			arrowInstType b t ++
-			".\n" ++
-			indent 2 (show be1)
 	show (TypeVarInst i be) = 
 			"forall types t" ++
 			show (2*i-1) ++
@@ -193,17 +206,17 @@ instance Show BoolExpr where
 
 indent n = unlines . map (replicate n ' ' ++) . lines
 
-arrowInstType :: Bool -> Typ -> String
-arrowInstType b = ait 0
-  where 
-	ait _ Int			= "Int" 
-	ait _ (TVar (TypVar i)) | not b	= "t" ++  show (2*i-1)
-                                |     b = "t" ++  show (2*i)
-	ait d (Arrow t1 t2)    		= paren (d>9) $ 
-						  ait 10 t1 ++ " -> " ++ ait 9 t2 
-	ait d (List t)          	= "[" ++ ait 0 t ++ "]"
-	ait d (TEither t1 t2)        	= "Either " ++ ait 11 t1 ++ 
-                                                " " ++ ait 11 t2
-	ait d (TPair t1 t2)        	= "(" ++ ait 0 t1 ++ "," ++ ait 0 t2 ++ ")"
+showTypePrec :: Int -> Typ -> String
+showTypePrec _ Int			    = "Int" 
+showTypePrec _ (TVar (TypVar i))            = "a"++show i
+showTypePrec _ (TVar (TypInst i b)) | not b = "t" ++  show (2*i-1)
+	      		            |     b = "t" ++  show (2*i)
+showTypePrec d (Arrow t1 t2)                = paren (d>9) $ 
+				  showTypePrec 10 t1 ++ " -> " ++ showTypePrec 9 t2 
+showTypePrec d (List t)          	    = "[" ++ showTypePrec 0 t ++ "]"
+showTypePrec d (TEither t1 t2)        	    = "Either " ++ showTypePrec 11 t1 ++ 
+					            " " ++ showTypePrec 11 t2
+showTypePrec d (TPair t1 t2)        	    = "(" ++ showTypePrec 0 t1 ++
+                                              "," ++ showTypePrec 0 t2 ++ ")"
 
 paren b p   =  if b then "(" ++ p ++ ")" else p
