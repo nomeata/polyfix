@@ -63,15 +63,53 @@ aand x        y        = And ([x,y])
 
 beTrue = And []
 
+-- | Is any var (or part of var) defined in cond, and can be replaced in concl?
+condition :: [TypedExpr] -> BoolExpr -> BoolExpr -> BoolExpr
+condition vars cond concl | ((vars',cond',concl'):_) <- mapMaybe try vars
+			  = condition vars' cond' concl'
+                          | otherwise
+                          = Condition vars cond concl
+  where try v = do d <- defFor v cond --Maybe Monad
+                   return (delete v vars, replaceTermBE v d cond, replaceTermBE v d concl)
+
+-- | Replaces a Term in a BoolExpr
+replaceTermBE :: TypedExpr -> TypedExpr -> BoolExpr -> BoolExpr
+replaceTermBE d' r' = go
+  where d = unTypeExpr d'
+        r = unTypeExpr r'
+	go (e1 `Equal` e2) | d == e1 && r == e2 = beTrue
+                           | d == e2 && r == e1 = beTrue
+                           | otherwise          = go' e1 `Equal` go' e2
+        go (And es)        = foldr aand beTrue (map go es)
+        go (AllZipWith v1 v2 be e1 e2) 
+                           = AllZipWith v1 v2 (go be) (go' e1) (go' e2)
+	go (Condition vs cond concl)
+			   = condition vs (go cond) (go concl)
+	go (UnpackPair v1 v2 e be)
+			   = unpackPair v1 v2 (goT e) (go be)
+	go (TypeVarInst _ _) = error "TypeVarInst not expected here"
+	goT = replaceTypedExpr d' r'
+	go' = replaceExpr d r
+
+replaceExpr :: Expr -> Expr -> Expr -> Expr
+replaceExpr d r = everywhere (mkT go)
+  where go e | e == d    = r 
+             | otherwise = e
+
+replaceTypedExpr :: TypedExpr -> TypedExpr -> TypedExpr -> TypedExpr
+replaceTypedExpr d r = everywhere (mkT go)
+  where go e | e == d    = r 
+             | otherwise = e
+
 -- | Is inside the term a definition for the variable?
 defFor :: TypedExpr -> BoolExpr -> Maybe TypedExpr
 defFor tv be | Just e' <- defFor' (unTypeExpr tv) be
                          = Just (TypedExpr e' (typeOf tv))
              | otherwise = Nothing
 	
-defFor' v (e1 `Equal` e2) | v == e1                 = Just e2
-                          | v == e2                 = Just e1
-defFor' v (And es)        | [d]  <- mapMaybe (defFor' v) es -- exactly one definition
+defFor' e (e1 `Equal` e2) | e == e1                 = Just e2
+                          | e == e2                 = Just e1
+defFor' e (And es)        | [d]  <- mapMaybe (defFor' e) es -- exactly one definition
 						    = Just d
 defFor' _ _                                         = Nothing
 

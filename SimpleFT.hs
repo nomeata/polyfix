@@ -32,22 +32,13 @@ freeTheorem' e1 e2 (Arrow t1 t2) | isTuple t1 = do
 		fillTuplevars True t1 $ \tve2 ->  do
 			cond  <- freeTheorem' (tve1) (tve2) t1
 			concl <- freeTheorem' (app e1 tve1) (app e2 tve2) t2
-			return $ Condition [tve1, tve2] cond concl
+			return $ condition [tve1, tve2] cond concl
 
 	-- No tuple on the left hand side:
                                  | otherwise  = getSideVars t1 $ \(v1,v2) -> do
 	cond  <- freeTheorem'  v1  v2 t1
-	-- See if the variables (tv*) actually have equivalent terms (ev*)
-	case (defFor  v1 cond, defFor  v2 cond) of
-	  (Just ev1, _) -> do
-		concl <- freeTheorem' (app e1 ev1) (app e2  v2) t2
-		return $ unCond v2 concl
-	  (Nothing,Just ev2) -> do
-		concl <- freeTheorem' (app e1  v1) (app e2 ev2) t2
-		return $ unCond v1 concl
-	  _ -> do
-		concl <- freeTheorem' (app e1  v1) (app e2  v2) t2
-		return $ Condition [ v1, v2 ] cond concl
+	concl <- freeTheorem' (app e1  v1) (app e2  v2) t2
+	return $ condition [ v1, v2 ] cond concl
 
 freeTheorem' e1 e2 (List t) = getSideVars t $ \(v1,v2) -> do
 	map <- freeTheorem' v1 v2 t
