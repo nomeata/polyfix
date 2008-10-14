@@ -24,11 +24,13 @@ freeTheorem' e1 e2 (TVar (TypVar i)) = return $
 freeTheorem' e1 e2 (Arrow t1 t2) | isTuple t1 = do
 	-- Create patterns for (possily nested) tuples and only give
 	-- the inner variables names
-	fillTuplevars t1 $ \ve1 -> 
-		fillTuplevars t1 $ \ve2 ->  do
-			cond  <- freeTheorem' ve1 ve2 t1
+	fillTuplevars False t1 $ \tve1 -> 
+		fillTuplevars True t1 $ \tve2 ->  do
+			let ve1 = unTypeExpr tve1
+                            ve2 = unTypeExpr tve2
+			cond  <- freeTheorem' (ve1) (ve2) t1
 			concl <- freeTheorem' (App e1 ve1) (App e2 ve2) t2
-			return $ Condition ve1 ve2 t1 cond concl
+			return $ Condition tve1 tve2 cond concl
 
 	-- No tuple on the left hand side:
                                  | otherwise  = getVars 2 $ \[v1,v2] -> do
@@ -43,7 +45,10 @@ freeTheorem' e1 e2 (Arrow t1 t2) | isTuple t1 = do
 		return $ unCond v1 False t1 concl
 	  _ -> do
 		concl <- freeTheorem' (App e1 (Var v1)) (App e2 (Var v2)) t2
-		return $ Condition (Var v1) (Var v2) t1 cond concl
+		return $ Condition (typedLeft (Var v1) t1)
+                                   (typedRight(Var v2) t1)
+                                   cond
+                                   concl
 
 freeTheorem' e1 e2 (List t) = getVars 2 $ \[v1,v2] -> do
 	map <- freeTheorem' (Var v1) (Var v2) t
@@ -78,10 +83,12 @@ freeTheorem' e1 e2 (All     (TypVar i) t) = TypeVarInst i `fmap` freeTheorem' e1
 getVars :: (MonadReader [String] m) => Int -> ([String] -> m a) -> m a
 getVars n a = asks (take n) >>= local (drop n) . a 
 
-fillTuplevars :: (MonadReader [String] m) => Typ -> (Expr -> m a) -> m a
-fillTuplevars (TPair t1 t2) a = do
-	fillTuplevars t1 $ \ve1 ->
-		fillTuplevars t2 $ \ve2 ->
-			a (Pair ve1 ve2)
-fillTuplevars _ a = getVars 1 $ \[s] -> a (Var s)
+fillTuplevars :: (MonadReader [String] m) => Bool -> Typ -> (TypedExpr -> m a) -> m a
+fillTuplevars rightSide t@(TPair t1 t2) a = do
+	fillTuplevars rightSide t1 $ \ve1 ->
+		fillTuplevars rightSide t2 $ \ve2 ->
+			let pair = Pair (unTypeExpr ve1) (unTypeExpr ve2) in
+			a (TypedExpr pair t rightSide)
+fillTuplevars rightSide t a = getVars 1 $ \[s] ->
+			a (TypedExpr (Var s) t rightSide)
 	

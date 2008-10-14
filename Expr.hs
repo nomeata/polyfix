@@ -4,6 +4,12 @@ module Expr where
 import Data.List
 import ParseType
 
+data TypedExpr = TypedExpr
+	{ unTypeExpr	:: Expr
+	, typeOf	:: Typ
+	, onRightSide	:: Bool
+	} deriving (Eq)
+
 data Expr
 	= Var String
 	| App Expr Expr
@@ -18,13 +24,17 @@ data BoolExpr
 	| Equal Expr Expr
 	| And BoolExpr BoolExpr
 	| AllZipWith String String BoolExpr Expr Expr
-	| Condition Expr Expr Typ BoolExpr BoolExpr
+	| Condition TypedExpr TypedExpr  BoolExpr BoolExpr
 	| UnpackPair String String Expr Bool Typ BoolExpr
 	| UnCond String Bool Typ BoolExpr
 	| TypeVarInst Int BoolExpr
             deriving (Eq)
 
 -- Smart constructors
+
+-- Left or right side of a relation (affects type variables)
+typedLeft e t = TypedExpr e t False
+typedRight e t = TypedExpr e t True
 
 equal = Equal
 
@@ -113,6 +123,13 @@ showIntercalate i []  = id
 showIntercalate i [x] = x
 showIntercalate i (x:xs) = x . i . showIntercalate i xs
 
+instance Show TypedExpr where
+	showsPrec d (TypedExpr e t rightSide) = 
+		showParen (d>10) $
+			showsPrec 0 e .
+			showString " :: " .
+			showString (arrowInstType rightSide t)
+
 instance Show BoolExpr where
 	show (Equal e1 e2) = showsPrec 9 e1 $
 			     showString " == " $
@@ -134,15 +151,11 @@ instance Show BoolExpr where
 			showsPrec 11 e1 "" ++
 			" " ++
 			showsPrec 11 e2 ""
-	show (Condition v1 v2 t be1 be2) = 
+	show (Condition tv1 tv2 be1 be2) = 
 			"forall " ++
-			showsPrec 11 v1 "" ++
-			" :: " ++
-			arrowInstType False t ++
+			showsPrec 0 tv1 "" ++
 			", " ++
-			showsPrec 11 v2 "" ++
-			" :: " ++
-			arrowInstType True t ++
+			showsPrec 0 tv2 "" ++
 			".\n" ++
 			(if be1 /= BETrue then indent 2 (show be1) ++ "==>\n" else "") ++
 			indent 2 (show be2)
