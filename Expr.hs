@@ -5,6 +5,8 @@ import Data.List
 import Data.Maybe
 import ParseType
 
+import Debug.Trace
+
 import Data.Generics hiding (typeOf)
 import Data.Generics.Schemes
 
@@ -52,11 +54,25 @@ equal' e1 e2  | (Just (lf,lv)) <- isFunctionApplication e1
 isFunctionApplication (App f e') | (Just (inner,v)) <- isFunctionApplication e'
                                  = Just (conc f inner, v)
                                  | otherwise
-                                 = Just (Conc [f], e')
+                                 = Just (f, e')
 isFunctionApplication _          = Nothing
 
 
-unpackPair = UnpackPair
+-- | If both bound variables are just functions, we can replace this
+--   by a comparison
+unpackPair v1 v2 te be | Just subst1 <- findReplacer v1 be
+                       , Just subst2 <- findReplacer v2 be
+		       = subst1. subst2 $ (pair v1 v2 `equal` te) `aand` be
+
+-- | If the whole tuple is a function, we can replace this
+--   by a comparison
+unpackPair v1 v2 te be | Just subst <- findReplacer (pair v1 v2) be
+		       = subst $ (pair v1 v2 `equal` te) `aand` be
+
+-- | Nothing to optimize
+unpackPair v1 v2 te be = UnpackPair v1 v2 te be
+
+pair (TypedExpr e1 t1) (TypedExpr e2 t2) = TypedExpr (Pair e1 e2) (TPair t1 t2)
 
 allZipWith :: TypedExpr -> TypedExpr -> BoolExpr -> TypedExpr -> TypedExpr -> BoolExpr
 allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
@@ -73,8 +89,6 @@ amap tf tl | Arrow t1 t2 <- typeOf tf
 	     in app (app tMap tf) tl
 amap tf tl | otherwise = error "Type error in map"
 
--- Float out foralls without condition
-aand (Condition vars beTrue concl) be = condition vars beTrue (aand concl be)
 aand (And xs) (And ys) = And (xs  ++ ys)
 aand (And xs) y        = And (xs  ++ [y])
 aand x        (And ys) = And ([x] ++ ys)
@@ -82,7 +96,7 @@ aand x        y        = And ([x,y])
 
 beTrue = And []
 
--- | Is any var (or part of var) defined in cond, and can be replaced in concl?
+-- | Optimize a forall condition
 condition :: [TypedExpr] -> BoolExpr -> BoolExpr -> BoolExpr
 -- empty condition
 condition [] cond concl   | cond == beTrue
@@ -95,12 +109,20 @@ condition vars cond (Condition vars' cond' concl')
 condition vars cond concl | True -- set to false to disable
                           , ((vars',cond',concl'):_) <- mapMaybe try vars
 			  = condition vars' cond' concl'
+              -- A variable which can be replaced
   where try v | Just subst <- findReplacer v cond
-              = Just (delete v vars, subst cond, subst concl)
+              = -- trace ("Tested " ++ show v ++ ", can be replaced") $
+                Just (delete v vars, subst cond, subst concl)
+ 
+	      -- A variable with can be removed
               | not (unTypeExpr v `occursIn` cond || unTypeExpr v `occursIn` concl)
-              = Just (delete v vars, cond, concl)
+              = -- trace ("Tested " ++ show v ++ ", can be reased") $
+                Just (delete v vars, cond, concl)
+
+              -- Nothing to do with this variable
               | otherwise
-              = Nothing
+              = -- trace ("Tested " ++ show v ++ " without success") $
+                Nothing
 
 -- Nothing left to optizmize
 condition vars cond concl = Condition vars cond concl
