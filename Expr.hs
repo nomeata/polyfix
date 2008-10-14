@@ -9,13 +9,17 @@ data Expr
 	| App Expr Expr
 	| Conc [Expr] -- Conc [] is Id
 	| Lambda String Expr
+	| Pair Expr Expr
 	| Map
             deriving (Eq)
 
 data BoolExpr 
-	= Equal Expr Expr
+	= BETrue
+	| Equal Expr Expr
+	| And BoolExpr BoolExpr
 	| AllZipWith String String BoolExpr Expr Expr
-	| Condition String String Typ BoolExpr BoolExpr
+	| Condition Expr Expr Typ BoolExpr BoolExpr
+	| UnpackPair String String Expr Bool Typ BoolExpr
 	| UnCond String Bool Typ BoolExpr
 	| TypeVarInst Int BoolExpr
             deriving (Eq)
@@ -24,11 +28,13 @@ data BoolExpr
 
 equal = Equal
 
+unpackPair = UnpackPair
+
 allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
 				e1 `equal` app (app Map (lambda v2 v1')) e2
-                         | Just v2' <- defFor v2 rel =
+                           | Just v2' <- defFor v2 rel =
 				app (app Map (lambda v1 v2')) e1 `equal` e2
-                         | otherwise =
+                           | otherwise =
 				AllZipWith v1 v2 rel e1 e2
 
 defFor v (e1 `Equal` e2) | (Var v) == e1 = Just e2
@@ -66,6 +72,9 @@ hasVar v (Conc es)    = any (hasVar v) es
 hasVar v (Lambda _ e) = hasVar v e
 hasVar v Map          = False
 
+isTuple (TPair _ _) = True
+isTuple _           = False
+
 
 -- showing
 
@@ -89,6 +98,10 @@ instance Show Expr where
                                    showString v .
                                    showString " -> ".
 			           showsPrec 0 e 
+	showsPrec _ (Pair e1 e2) = showParen True $ 
+			           showsPrec 0 e1 .
+				   showString "," .
+			           showsPrec 0 e2
 	showsPrec _ Map           = showString "map"
 
 showIntercalate i []  = id
@@ -99,6 +112,9 @@ instance Show BoolExpr where
 	show (Equal e1 e2) = showsPrec 9 e1 $
 			     showString " == " $
 			     showsPrec 9 e2 ""
+	show (And be1 be2) = show be1 ++
+			     " && " ++
+			     show be2 
 	show (AllZipWith v1 v2 be e1 e2) =
 			"allZipWith " ++
 			"( " ++
@@ -115,17 +131,27 @@ instance Show BoolExpr where
 			showsPrec 11 e2 ""
 	show (Condition v1 v2 t be1 be2) = 
 			"forall " ++
-			v1 ++
+			showsPrec 11 v1 "" ++
 			" :: " ++
 			arrowInstType False t ++
 			", " ++
-			v2 ++
+			showsPrec 11 v2 "" ++
 			" :: " ++
 			arrowInstType True t ++
 			".\n" ++
-			indent 2 (show be1) ++
-			"==>\n" ++
+			(if be1 /= BETrue then indent 2 (show be1) ++ "==>\n" else "") ++
 			indent 2 (show be2)
+	show (UnpackPair v1 v2 e b t be) = 
+			"let (" ++
+			v1 ++
+			"," ++
+			v2 ++
+			") = " ++
+			showsPrec 0 e "" ++
+			" :: " ++
+			arrowInstType b t ++
+			" in\n" ++
+			indent 2 (show be)
 	show (UnCond v1 b t be1) = 
 			"forall " ++
 			v1 ++
@@ -160,6 +186,6 @@ arrowInstType b = ait 0
 	ait d (List t)          	= "[" ++ ait 0 t ++ "]"
 	ait d (TEither t1 t2)        	= "Either " ++ ait 11 t1 ++ 
                                                 " " ++ ait 11 t2
-	ait d (TPair t1 t2)        	= "(" ++ ait 0 t1 ++ ", " ++ ait 0 t2 ++ ")"
+	ait d (TPair t1 t2)        	= "(" ++ ait 0 t1 ++ "," ++ ait 0 t2 ++ ")"
 
 paren b p   =  if b then "(" ++ p ++ ")" else p
