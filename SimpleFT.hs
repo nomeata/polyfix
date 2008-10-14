@@ -22,14 +22,18 @@ freeTheorem' e1 e2 (TVar (TypVar i)) = return $
 	Equal (App (Var ("g"++show i)) e1) e2
 
 freeTheorem' e1 e2 (Arrow t1 t2) | isTuple t1 = do
+	-- Create patterns for (possily nested) tuples and only give
+	-- the inner variables names
 	fillTuplevars t1 $ \ve1 -> 
 		fillTuplevars t1 $ \ve2 ->  do
 			cond  <- freeTheorem' ve1 ve2 t1
 			concl <- freeTheorem' (App e1 ve1) (App e2 ve2) t2
 			return $ Condition ve1 ve2 t1 cond concl
 
+	-- No tuple on the left hand side:
                                  | otherwise  = getVars 2 $ \[v1,v2] -> do
 	cond  <- freeTheorem' (Var v1) (Var v2) t1
+	-- See if the variables actually have definitions
 	case (defFor v1 cond, defFor v2 cond) of
 	  (Just ev1, _) -> do
 		concl <- freeTheorem' (App e1 ev1)      (App e2 (Var v2)) t2

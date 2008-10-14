@@ -37,8 +37,13 @@ allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
                            | otherwise =
 				AllZipWith v1 v2 rel e1 e2
 
+-- | Is inside the term a definition for the variable?
 defFor v (e1 `Equal` e2) | (Var v) == e1 = Just e2
                          | (Var v) == e2 = Just e1
+defFor v (e1 `And` e2)   | Just d  <- defFor v e1
+		         , Nothing <- defFor v e2 = Just d
+defFor v (e1 `And` e2)   | Just d  <- defFor v e2
+		         , Nothing <- defFor v e1 = Just d
 defFor _ _                               = Nothing
 
 app Map (Conc []) = Conc []
