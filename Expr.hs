@@ -14,7 +14,7 @@ data Expr
 
 data BoolExpr 
 	= Equal Expr Expr
-	| Pairwise String String BoolExpr Expr Expr
+	| AllZipWith String String BoolExpr Expr Expr
 	| Condition String String Typ BoolExpr BoolExpr
 	| UnCond String Bool Typ BoolExpr
 	| TypeVarInst Int BoolExpr
@@ -24,12 +24,12 @@ data BoolExpr
 
 equal = Equal
 
-pairwise v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
+allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
 				e1 `equal` app (app Map (lambda v2 v1')) e2
                          | Just v2' <- defFor v2 rel =
 				app (app Map (lambda v1 v2')) e1 `equal` e2
                          | otherwise =
-				Pairwise v1 v2 rel e1 e2
+				AllZipWith v1 v2 rel e1 e2
 
 defFor v (e1 `Equal` e2) | (Var v) == e1 = Just e2
                          | (Var v) == e2 = Just e1
@@ -99,7 +99,7 @@ instance Show BoolExpr where
 	show (Equal e1 e2) = showsPrec 9 e1 $
 			     showString " == " $
 			     showsPrec 9 e2 ""
-	show (Pairwise v1 v2 be e1 e2) =
+	show (AllZipWith v1 v2 be e1 e2) =
 			"allZipWith " ++
 			"( " ++
 			"\\" ++

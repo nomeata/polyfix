@@ -22,7 +22,7 @@ freeTheorem' e1 e2 (List t) = do
 	[v1,v2] <- asks (take 2)
 	local (drop 2) $ do
 		map <- freeTheorem' (Var v1) (Var v2) t
-		return $ pairwise v1 v2 map e1 e2
+		return $ allZipWith v1 v2 map e1 e2
 
 freeTheorem' e1 e2 (Arrow t1 t2) = do
 	[v1,v2] <- asks (take 2)
