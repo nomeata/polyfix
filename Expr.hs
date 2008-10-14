@@ -42,9 +42,10 @@ equal te1 te2 | typeOf te1 /= typeOf te2 = error "Type mismatch in equal"
 
 unpackPair = UnpackPair
 
-allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
+allZipWith :: TypedExpr -> TypedExpr -> BoolExpr -> TypedExpr -> TypedExpr -> BoolExpr
+allZipWith v1 v2 rel e1 e2 | Just (v1', _) <- defFor v1 rel =
 				e1 `equal` amap (lambda v2 v1') e2
-                           | Just v2' <- defFor v2 rel =
+                           | Just (v2', _) <- defFor v2 rel =
 				amap (lambda v1 v2') e1 `equal` e2
                            | otherwise =
 				AllZipWith v1 v2 rel (unTypeExpr e1) (unTypeExpr e2)
@@ -69,15 +70,13 @@ condition vars cond concl | ((vars',cond',concl'):_) <- mapMaybe try vars
 			  = condition vars' cond' concl'
                           | otherwise
                           = Condition vars cond concl
-  where try v = do d <- defFor v cond --Maybe Monad
-                   return (delete v vars, replaceTermBE v d cond, replaceTermBE v d concl)
+  where try v = do (def,del) <- defFor v cond --Maybe Monad
+                   return (delete v vars, del cond, del concl)
 
 -- | Replaces a Term in a BoolExpr
-replaceTermBE :: TypedExpr -> TypedExpr -> BoolExpr -> BoolExpr
-replaceTermBE d' r' = go
-  where d = unTypeExpr d'
-        r = unTypeExpr r'
-	go (e1 `Equal` e2) | d == e1 && r == e2 = beTrue
+replaceTermBE :: Expr -> Expr -> BoolExpr -> BoolExpr
+replaceTermBE d r = go
+  where go (e1 `Equal` e2) | d == e1 && r == e2 = beTrue
                            | d == e2 && r == e1 = beTrue
                            | otherwise          = go' e1 `Equal` go' e2
         go (And es)        = foldr aand beTrue (map go es)
@@ -88,7 +87,7 @@ replaceTermBE d' r' = go
 	go (UnpackPair v1 v2 e be)
 			   = unpackPair v1 v2 (goT e) (go be)
 	go (TypeVarInst _ _) = error "TypeVarInst not expected here"
-	goT = replaceTypedExpr d' r'
+	goT = replaceTypedExpr d r
 	go' = replaceExpr d r
 
 replaceExpr :: Expr -> Expr -> Expr -> Expr
@@ -96,19 +95,24 @@ replaceExpr d r = everywhere (mkT go)
   where go e | e == d    = r 
              | otherwise = e
 
-replaceTypedExpr :: TypedExpr -> TypedExpr -> TypedExpr -> TypedExpr
+replaceTypedExpr :: Expr -> Expr -> TypedExpr -> TypedExpr
 replaceTypedExpr d r = everywhere (mkT go)
-  where go e | e == d    = r 
-             | otherwise = e
+  where go e | unTypeExpr e == d = e { unTypeExpr = r }
+             | otherwise         = e
 
 -- | Is inside the term a definition for the variable?
-defFor :: TypedExpr -> BoolExpr -> Maybe TypedExpr
-defFor tv be | Just e' <- defFor' (unTypeExpr tv) be
-                         = Just (TypedExpr e' (typeOf tv))
+defFor :: TypedExpr -> BoolExpr -> Maybe (TypedExpr, BoolExpr -> BoolExpr)
+defFor tv be | Just (e', delDef) <- defFor' (unTypeExpr tv) be
+                         = Just (TypedExpr e' (typeOf tv), delDef)
              | otherwise = Nothing
 	
-defFor' e (e1 `Equal` e2) | e == e1                 = Just e2
-                          | e == e2                 = Just e1
+-- | Find a definition, and return it along the definition remover
+defFor' :: Expr -> BoolExpr -> Maybe (Expr, BoolExpr -> BoolExpr)
+defFor' (Pair x y) e | Just (dx, delX) <- defFor' x e
+                     , Just (dy, delY) <- defFor' y e
+                    = Just ((Pair dx dy), delX . delY)
+defFor' e (e1 `Equal` e2) | e == e1                 = Just (e2, replaceTermBE e e2)
+                          | e == e2                 = Just (e1, replaceTermBE e e1)
 defFor' e (And es)        | [d]  <- mapMaybe (defFor' e) es -- exactly one definition
 						    = Just d
 defFor' _ _                                         = Nothing
