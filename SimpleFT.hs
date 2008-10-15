@@ -48,16 +48,10 @@ freeTheorem' e1 e2 (List t) = getSideVars t $ \(v1,v2) -> do
 	mapRel <- freeTheorem' v1 v2 t
 	return $ allZipWith v1 v2 mapRel e1 e2
 
-{-
-freeTheorem' e1 e2 (TPair t1 t2) = getVars 4 $ \[x1,x2,y1,y2] -> do
-	concl1 <- freeTheorem' (Var x1) (Var y1) t1
-	concl2 <- freeTheorem' (Var x2) (Var y2) t2
-	return $ Condition x1 y1 t1 BETrue $
-		 Condition x2 y2 t2 (
-			And (Equal e2 (Pair (Var y1) (Var y2)))
-			    (Equal e1 (Pair (Var x1) (Var x2)))) $
-			And concl1 concl2
--}
+freeTheorem' e1 e2 (TEither t1 t2) = do
+	rel1 <- genRel t1
+	rel2 <- genRel t2
+	return $ andEither rel1 rel2 e1 e2
 
 freeTheorem' e1 e2 (TPair t1 t2) 
 	| (Pair   x1  x2) <- unTypeExpr e1
@@ -87,6 +81,10 @@ freeTheorem' e1 e2 (TPair t1 t2)
 
 freeTheorem' e1 e2 (AllStar (TypVar i) t) = TypeVarInst i `fmap` freeTheorem' e1 e2 t
 freeTheorem' e1 e2 (All     (TypVar i) t) = TypeVarInst i `fmap` freeTheorem' e1 e2 t
+
+genRel t = getSideVars t $ \(v1,v2) -> do
+		mapRel <- freeTheorem' v1 v2 t
+		return $ lambdaBE v1 v2 mapRel
 
 getVars :: (MonadReader [String] m) => Int -> ([String] -> m a) -> m a
 getVars n a = asks (take n) >>= local (drop n) . a 

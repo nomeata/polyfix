@@ -28,10 +28,15 @@ data Expr
 	| Map
             deriving (Eq, Typeable, Data)
 
+data LambdaBE = CurriedEquals
+	      | LambdaBE TypedExpr TypedExpr BoolExpr
+            deriving (Eq, Typeable, Data)
+
 data BoolExpr 
 	= Equal Expr Expr
 	| And [BoolExpr] -- And [] is True
-	| AllZipWith TypedExpr TypedExpr BoolExpr Expr Expr
+	| AllZipWith LambdaBE Expr Expr
+	| AndEither  LambdaBE LambdaBE Expr Expr
 	| Condition [TypedExpr] BoolExpr BoolExpr
 	| UnpackPair TypedExpr TypedExpr TypedExpr BoolExpr
 	| TypeVarInst Int BoolExpr
@@ -81,13 +86,23 @@ unpackPair v1 v2 te be = UnpackPair v1 v2 te be
 pair :: TypedExpr -> TypedExpr -> TypedExpr
 pair (TypedExpr e1 t1) (TypedExpr e2 t2) = TypedExpr (Pair e1 e2) (TPair t1 t2)
 
+lambdaBE :: TypedExpr -> TypedExpr -> BoolExpr -> LambdaBE
+lambdaBE v1 v2 rel | typeOf v1 == typeOf v2 
+                   , rel == v1 `equal` v2    = CurriedEquals
+	           | otherwise               = LambdaBE v1 v2 rel
+
+andEither :: LambdaBE -> LambdaBE -> TypedExpr -> TypedExpr -> BoolExpr
+andEither CurriedEquals CurriedEquals e1 e2 = e1 `equal` e2
+andEither lbe1 lbe2 e1 e2 =
+	AndEither lbe1 lbe2 (unTypeExpr e1) (unTypeExpr e2)
+
 allZipWith :: TypedExpr -> TypedExpr -> BoolExpr -> TypedExpr -> TypedExpr -> BoolExpr
 allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
 				e1 `equal` amap (lambda v2 v1') e2
                            | Just v2' <- defFor v2 rel =
 				amap (lambda v1 v2') e1 `equal` e2
                            | otherwise =
-				AllZipWith v1 v2 rel (unTypeExpr e1) (unTypeExpr e2)
+				AllZipWith (LambdaBE v1 v2 rel) (unTypeExpr e1) (unTypeExpr e2)
 
 amap :: TypedExpr -> TypedExpr -> TypedExpr
 amap tf tl | Arrow t1 t2 <- typeOf tf
@@ -144,8 +159,12 @@ replaceTermBE d r = go
                            | d == e2 && r == e1 = beTrue
                            | otherwise          = go' e1 `equal'` go' e2
         go (And es)        = foldr aand beTrue (map go es)
-        go (AllZipWith v1 v2 be e1 e2) 
-                           = AllZipWith v1 v2 (go be) (go' e1) (go' e2)
+        go (AllZipWith (LambdaBE v1 v2 be) e1 e2) 
+                           = AllZipWith (lambdaBE v1 v2 (go be)) (go' e1) (go' e2)
+        go (AndEither (LambdaBE l1 l2 be1) (LambdaBE r1 r2 be2) e1 e2)
+			   = AndEither (lambdaBE l1 l2 (go be1))
+			               (lambdaBE r1 r2 (go be2))
+                                       (go' e1) (go' e2)
 	go (Condition vs cond concl)
 			   = condition vs (go cond) (go concl)
 	go (UnpackPair v1 v2 e be)
@@ -279,22 +298,37 @@ instance Show TypedExpr where
 			showString " :: " .
 			showString (showTypePrec 0 t)
 
+instance Show LambdaBE where
+	show (CurriedEquals) = 
+			"(==)"
+	show (LambdaBE v1 v2 be) = 
+			"(" ++
+			"\\" ++
+			showsPrec 11 (unTypeExpr v1) "" ++
+			" " ++
+			showsPrec 11 (unTypeExpr v2) "" ++
+			" -> " ++
+			show be ++
+			")"
+
 instance Show BoolExpr where
 	show (Equal e1 e2) = showsPrec 9 e1 $
 			     showString " == " $
 			     showsPrec 9 e2 ""
 	show (And [])      = "True"
         show (And bes)     = intercalate " && " $ map show bes
-	show (AllZipWith v1 v2 be e1 e2) =
+	show (AllZipWith lbe e1 e2) =
 			"allZipWith " ++
-			"( " ++
-			"\\" ++
-			showsPrec 11 v1 "" ++
+			show lbe ++
 			" " ++
-			showsPrec 11 v2 "" ++
-			" -> " ++
-			show be ++
-			")" ++
+			showsPrec 11 e1 "" ++
+			" " ++
+			showsPrec 11 e2 ""
+	show (AndEither lbe1 lbe2 e1 e2) =
+			"andEither " ++
+			show lbe1 ++
+			" " ++
+			show lbe2 ++
 			" " ++
 			showsPrec 11 e1 "" ++
 			" " ++
