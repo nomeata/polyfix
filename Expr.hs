@@ -19,8 +19,14 @@ typedLeft, typedRight :: Expr -> Typ -> TypedExpr
 typedLeft  e t = TypedExpr e (instType False t)
 typedRight e t = TypedExpr e (instType True t)
 
+data EVar = F
+	  | FromTypVar Int
+          | FromParam Int Bool
+            deriving (Eq, Typeable, Data)
+
 data Expr
-	= Var String
+	= Var EVar
+	| TheOneFunc
 	| App Expr Expr
 	| Conc [Expr] -- Conc [] is Id
 	| Lambda TypedExpr Expr
@@ -40,7 +46,7 @@ data BoolExpr
 	| AndEither  LambdaBE LambdaBE Expr Expr
 	| Condition [TypedExpr] BoolExpr BoolExpr
 	| UnpackPair TypedExpr TypedExpr TypedExpr BoolExpr
-	| TypeVarInst Int BoolExpr
+	| TypeVarInst Bool Int BoolExpr
             deriving (Eq, Typeable, Data)
 
 -- Smart constructors
@@ -194,7 +200,7 @@ replaceTermBE d r = go
 			   = condition vs (go cond) (go concl)
 	go (UnpackPair v1 v2 e be)
 			   = unpackPair v1 v2 (go' e) (go be)
-	go (TypeVarInst _ _) = error "TypeVarInst not expected here"
+	go (TypeVarInst _ _ _) = error "TypeVarInst not expected here"
 
 	go' :: Data a => a -> a
 	go' = replaceExpr d r
@@ -263,6 +269,10 @@ conc (Conc xs)  y        = Conc (xs  ++ [y])
 conc x         (Conc ys) = Conc ([x] ++ ys)
 conc x          y        = Conc ([x,y])
 
+
+-- Specialization of g'
+
+
 -- Helpers
 
 isApplOn :: Expr -> Expr -> Maybe Expr
@@ -270,14 +280,6 @@ isApplOn e e'         | e == e'                       = Nothing
 isApplOn e (App f e') | e == e'                       = Just (Conc [f])
 isApplOn e (App f e') | (Just inner) <- isApplOn e e' = Just (conc f inner)
 isApplOn _ _                                          = Nothing
-
-hasVar :: String -> Expr -> Bool
-hasVar v (Var v')     = v == v'
-hasVar v (App e1 e2)  = hasVar v e1 || hasVar v e2
-hasVar v (Conc es)    = any (hasVar v) es
-hasVar v (Lambda _ e) = hasVar v e
-hasVar v (Pair e1 e2) = hasVar v e1 || hasVar v e2
-hasVar _ Map          = False
 
 occursIn :: (Typeable a, Data a1, Eq a) => a -> a1 -> Bool
 e `occursIn` e'       = not (null (listify (==e) e'))
@@ -296,8 +298,14 @@ isTuple _           = False
 --  7 ==>
 --  6 forall
 
+instance Show EVar where
+	show F               = "f"
+	show (FromTypVar i)  = "g" ++ show i
+	show (FromParam i b) = "x" ++ show i ++ if b then "'" else ""
+
+
 instance Show Expr where
-	showsPrec _ (Var s)     = showString s
+	showsPrec _ (Var v)     = showsPrec 11 v
 	showsPrec d (App e1 e2) = showParen (d>10) $
 		showsPrec 10 e1 . showChar ' ' . showsPrec 11 e2
 	showsPrec _ (Conc [])   = showString "id"
@@ -378,12 +386,14 @@ instance Show BoolExpr where
 			showsPrec 0 e "" ++
 			" in\n" ++
 			indent 2 (show be)
-	show (TypeVarInst i be) = 
+	show (TypeVarInst strict i be) = 
 			"forall types t" ++
 			show (2*i-1) ++
 			", t" ++
 			show (2*i) ++
-			", function g" ++
+			", " ++
+			(if strict then "strict " else "") ++
+                        "functions g" ++
 			show i ++
 			" :: t" ++
 			show (2*i-1) ++
