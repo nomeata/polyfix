@@ -26,9 +26,10 @@ data Expr
 	| Lambda TypedExpr Expr
 	| Pair Expr Expr
 	| Map
+	| EitherMap
             deriving (Eq, Typeable, Data)
 
-data LambdaBE = CurriedEquals
+data LambdaBE = CurriedEquals Typ
 	      | LambdaBE TypedExpr TypedExpr BoolExpr
             deriving (Eq, Typeable, Data)
 
@@ -88,13 +89,29 @@ pair (TypedExpr e1 t1) (TypedExpr e2 t2) = TypedExpr (Pair e1 e2) (TPair t1 t2)
 
 lambdaBE :: TypedExpr -> TypedExpr -> BoolExpr -> LambdaBE
 lambdaBE v1 v2 rel | typeOf v1 == typeOf v2 
-                   , rel == v1 `equal` v2    = CurriedEquals
+                   , rel == v1 `equal` v2    = CurriedEquals (typeOf v1)
 	           | otherwise               = LambdaBE v1 v2 rel
 
 andEither :: LambdaBE -> LambdaBE -> TypedExpr -> TypedExpr -> BoolExpr
-andEither CurriedEquals CurriedEquals e1 e2 = e1 `equal` e2
-andEither lbe1 lbe2 e1 e2 =
-	AndEither lbe1 lbe2 (unTypeExpr e1) (unTypeExpr e2)
+andEither (CurriedEquals _) (CurriedEquals _) e1 e2 = e1 `equal` e2
+andEither lbe1 lbe2 e1 e2 | Just f1 <- arg1IsFunc lbe1
+                          , Just f2 <- arg1IsFunc lbe2
+			  = e1 `equal` eitherE f1 f2 e2
+                          | Just f1 <- arg2IsFunc lbe1
+                          , Just f2 <- arg2IsFunc lbe2
+			  = eitherE f1 f2 e1 `equal` e2
+			  | otherwise
+                          = AndEither lbe1 lbe2 (unTypeExpr e1) (unTypeExpr e2)
+
+arg1IsFunc (CurriedEquals t)    = Just $ TypedExpr (Conc []) (Arrow t t)
+arg1IsFunc (LambdaBE v1 v2 rel) | Just v1' <- defFor v1 rel
+                                = Just (lambda v2 v1')
+	                        | otherwise = Nothing
+
+arg2IsFunc (CurriedEquals t)    = Just $ TypedExpr (Conc []) (Arrow t t)
+arg2IsFunc (LambdaBE v1 v2 rel) | Just v2' <- defFor v2 rel
+                                = Just (lambda v1 v2')
+	                        | otherwise = Nothing
 
 allZipWith :: TypedExpr -> TypedExpr -> BoolExpr -> TypedExpr -> TypedExpr -> BoolExpr
 allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
@@ -104,13 +121,23 @@ allZipWith v1 v2 rel e1 e2 | Just v1' <- defFor v1 rel =
                            | otherwise =
 				AllZipWith (LambdaBE v1 v2 rel) (unTypeExpr e1) (unTypeExpr e2)
 
+eitherE :: TypedExpr -> TypedExpr -> TypedExpr -> TypedExpr
+eitherE f1 f2 e | Arrow lt1 lt2 <- typeOf f1
+                , Arrow rt1 rt2 <- typeOf f2
+                , TEither lt rt <- typeOf e
+                , lt1 == lt
+                , rt1 == rt
+	= let tEither = TypedExpr EitherMap (Arrow (typeOf f1) (Arrow (typeOf f2) (Arrow (typeOf e) (TEither lt2 rt2))))
+          in  app (app (app tEither f1) f2) e
+                | otherwise = error $ "Type error in eitherE\n" ++ show (f1, f2, e)
+
 amap :: TypedExpr -> TypedExpr -> TypedExpr
 amap tf tl | Arrow t1 t2 <- typeOf tf
            , List t      <- typeOf tl
            , t1 == t
            = let tMap = TypedExpr Map (Arrow (Arrow t1 t2) (Arrow (List t1) (List t2)))
 	     in app (app tMap tf) tl
-amap _ _   | otherwise = error "Type error in map"
+           | otherwise = error "Type error in map"
 
 aand :: BoolExpr -> BoolExpr -> BoolExpr
 aand (And xs) (And ys) = And (xs  ++ ys)
@@ -159,19 +186,21 @@ replaceTermBE d r = go
                            | d == e2 && r == e1 = beTrue
                            | otherwise          = go' e1 `equal'` go' e2
         go (And es)        = foldr aand beTrue (map go es)
-        go (AllZipWith (LambdaBE v1 v2 be) e1 e2) 
-                           = AllZipWith (lambdaBE v1 v2 (go be)) (go' e1) (go' e2)
-        go (AndEither (LambdaBE l1 l2 be1) (LambdaBE r1 r2 be2) e1 e2)
-			   = AndEither (lambdaBE l1 l2 (go be1))
-			               (lambdaBE r1 r2 (go be2))
-                                       (go' e1) (go' e2)
+        go (AllZipWith lbe e1 e2) 
+                           = AllZipWith (goL lbe) (go' e1) (go' e2)
+        go (AndEither lbe1 lbe2 e1 e2)
+			   = AndEither (goL lbe1) (goL lbe2) (go' e1) (go' e2)
 	go (Condition vs cond concl)
 			   = condition vs (go cond) (go concl)
 	go (UnpackPair v1 v2 e be)
 			   = unpackPair v1 v2 (go' e) (go be)
 	go (TypeVarInst _ _) = error "TypeVarInst not expected here"
+
 	go' :: Data a => a -> a
 	go' = replaceExpr d r
+
+	goL (CurriedEquals t)   = (CurriedEquals t)
+	goL (LambdaBE v1 v2 be) = lambdaBE v1 v2 (go be)
 
 replaceExpr :: Data a => Expr -> Expr -> a -> a
 replaceExpr d r = everywhere (mkT go)
@@ -285,6 +314,7 @@ instance Show Expr where
 				   showString "," .
 			           showsPrec 0 e2
 	showsPrec _ Map           = showString "map"
+	showsPrec _ EitherMap     = showString "eitherMap"
 
 showIntercalate :: ShowS -> [ShowS] -> ShowS
 showIntercalate _ []  = id
@@ -299,7 +329,7 @@ instance Show TypedExpr where
 			showString (showTypePrec 0 t)
 
 instance Show LambdaBE where
-	show (CurriedEquals) = 
+	show (CurriedEquals _) = 
 			"(==)"
 	show (LambdaBE v1 v2 be) = 
 			"(" ++
@@ -379,6 +409,7 @@ showTypePrec _ (TEither t1 t2)        	    = "Either " ++ showTypePrec 11 t1 ++
 					            " " ++ showTypePrec 11 t2
 showTypePrec _ (TPair t1 t2)        	    = "(" ++ showTypePrec 0 t1 ++
                                               "," ++ showTypePrec 0 t2 ++ ")"
+showTypePrec _ t                            = error $ "Did not expect to show " ++ show t
 
 paren :: Bool -> String -> String
 paren b p   =  if b then "(" ++ p ++ ")" else p

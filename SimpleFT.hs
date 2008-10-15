@@ -19,7 +19,7 @@ freeVars :: [String]
 freeVars = map (:"") (delete 'f' ['a'..])
 
 
-freeTheorem' :: TypedExpr -> TypedExpr -> Typ -> Reader [String] BoolExpr
+freeTheorem' :: (MonadReader [String] m) => TypedExpr -> TypedExpr -> Typ -> m BoolExpr
 
 freeTheorem' e1 e2 Int = return $
 	equal e1 e2
@@ -79,9 +79,12 @@ freeTheorem' e1 e2 (TPair t1 t2)
  where (TPair tx1 tx2) = typeOf e1
        (TPair ty1 ty2) = typeOf e2
 
-freeTheorem' e1 e2 (AllStar (TypVar i) t) = TypeVarInst i `fmap` freeTheorem' e1 e2 t
-freeTheorem' e1 e2 (All     (TypVar i) t) = TypeVarInst i `fmap` freeTheorem' e1 e2 t
+freeTheorem' e1 e2 (AllStar (TypVar i) t) = TypeVarInst i `liftM` freeTheorem' e1 e2 t
+freeTheorem' e1 e2 (All     (TypVar i) t) = TypeVarInst i `liftM` freeTheorem' e1 e2 t
 
+freeTheorem' _ _ t = error $ "Type " ++ show t ++ " passed to freeTheorem'"
+
+genRel :: (MonadReader [String] m) => Typ -> m LambdaBE
 genRel t = getSideVars t $ \(v1,v2) -> do
 		mapRel <- freeTheorem' v1 v2 t
 		return $ lambdaBE v1 v2 mapRel
