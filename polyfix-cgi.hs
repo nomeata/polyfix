@@ -41,12 +41,12 @@ cgiMain = do
 	
 	outputFPS $ fromString $ showHtml $
 	       header (
-		thetitle << "Name Me" +++
+		thetitle << "PolyFix" +++
 		style ! [ thetype "text/css" ] << cdata cssStyle
 	       ) +++
 	       body ( form ! [method "POST", action "#"] << (
 		thediv ! [theclass "top"] << (
-			thespan ! [theclass "title"] << "Name Me" +++
+			thespan ! [theclass "title"] << "PolyFix" +++
 			thespan ! [theclass "subtitle"] << "Counter Examples for Free Theorems"
 		) +++
 		content +++
