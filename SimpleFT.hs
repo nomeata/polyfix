@@ -7,12 +7,15 @@ import Expr
 import Control.Monad.Reader
 import Data.List
 
+test :: String -> IO ()
 test = putStrLn . show . freeTheorem . parseType
 
+freeTheorem :: Typ -> BoolExpr
 freeTheorem t = flip runReader freeVars $ 
 			freeTheorem' (typedLeft  (Var "f") (unquantify t))
 				     (typedRight (Var "f") (unquantify t))
                                      t
+freeVars :: [String]
 freeVars = map (:"") (delete 'f' ['a'..])
 
 
@@ -42,8 +45,8 @@ freeTheorem' e1 e2 (Arrow t1 t2) | isTuple t1 = do
 	return $ condition [ v1, v2 ] cond concl
 
 freeTheorem' e1 e2 (List t) = getSideVars t $ \(v1,v2) -> do
-	map <- freeTheorem' v1 v2 t
-	return $ allZipWith v1 v2 map e1 e2
+	mapRel <- freeTheorem' v1 v2 t
+	return $ allZipWith v1 v2 mapRel e1 e2
 
 {-
 freeTheorem' e1 e2 (TPair t1 t2) = getVars 4 $ \[x1,x2,y1,y2] -> do
@@ -56,7 +59,7 @@ freeTheorem' e1 e2 (TPair t1 t2) = getVars 4 $ \[x1,x2,y1,y2] -> do
 			And concl1 concl2
 -}
 
-freeTheorem' e1 e2 t@(TPair t1 t2) 
+freeTheorem' e1 e2 (TPair t1 t2) 
 	| (Pair   x1  x2) <- unTypeExpr e1
 	, (Pair   y1  y2) <- unTypeExpr e2
 	   = do concl1 <- freeTheorem' 
@@ -98,8 +101,8 @@ fillTuplevars :: (MonadReader [String] m) =>
 fillTuplevars rightSide t@(TPair t1 t2) a = do
 	fillTuplevars rightSide t1 $ \vars1 ve1  ->
 		fillTuplevars rightSide t2 $ \vars2 ve2 ->
-			let pair  = Pair (unTypeExpr ve1) (unTypeExpr ve2)
-		            tpair = TypedExpr pair (instType rightSide t)
+			let untypedPair  = Pair (unTypeExpr ve1) (unTypeExpr ve2)
+		            tpair = TypedExpr untypedPair (instType rightSide t)
 			in a (vars1 ++ vars2) tpair
 fillTuplevars rightSide t a = getVars 1 $ \[s] ->
 			let tvar = TypedExpr (Var s) (instType rightSide t)

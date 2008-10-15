@@ -10,7 +10,6 @@ module ParseType (
 import Language.Haskell.Parser (parseModule, ParseResult(..))
 import Language.Haskell.Syntax
 
-import Control.Monad
 import Control.Monad.Error
 import Control.Monad.Reader
 import Data.List
@@ -39,10 +38,12 @@ data Typ    = TVar    TypVar
             | TEither  Typ     Typ
             deriving (Show, Eq, Typeable, Data)
 
+unquantify :: Typ -> Typ
 unquantify (All     _ t) = unquantify t
 unquantify (AllStar _ t) = unquantify t
 unquantify t             = t
 
+parseType :: String -> Typ
 parseType = either error id . parseType'
 
 -- | A simple type parser.
@@ -73,7 +74,7 @@ createVarMap :: HsType -> M.Map HsName TypVar
 createVarMap hstype = M.fromList $ zip
 			(nub (listify isVar hstype))
 			(map TypVar [1..])
-  where isVar (HsIdent (x:xs)) | isLower x  = True
+  where isVar (HsIdent (x:_)) | isLower x  = True
         isVar _                            =  False
 
 
@@ -96,6 +97,6 @@ simplifiyType t
 				= throwError ("Unsupported type " ++ show t)
 
 quantify :: [TypVar] -> Typ -> Typ
-quantify special t = foldr all t (nub (listify (\(_::TypVar) -> True) t))
-  where all v | v `elem` special = All v
-              | otherwise        = AllStar v
+quantify special t = foldr allQuant t (nub (listify (\(_::TypVar) -> True) t))
+  where allQuant v | v `elem` special = All v
+                   | otherwise        = AllStar v
