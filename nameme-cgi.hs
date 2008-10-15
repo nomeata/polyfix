@@ -3,6 +3,18 @@ module Main where
 import ParseType (parseType')
 import SimpleFT  (freeTheorem)
 import ExFindExtended (getComplete')
+import Language.Haskell.FreeTheorems.Parser.Haskell98 as FTP
+import Language.Haskell.FreeTheorems
+	( runChecks
+	, check
+	, filterSignatures
+	, prettyTheorem
+	, asTheorem
+	, interpret
+	, unfoldLifts
+	, prettyUnfoldedLift
+	, LanguageSubset(BasicSubset)
+	)
 
 import Network.CGI
 import Data.ByteString.Lazy.UTF8 (fromString)
@@ -10,6 +22,7 @@ import Text.XHtml
 import Control.Monad
 import System.Random (randomRIO)
 import Data.Maybe
+import Text.PrettyPrint.HughesPJ (render)
 
 main = runCGI (handleErrors cgiMain)
 
@@ -91,13 +104,19 @@ generateResult typeStr typ = maindiv << (
 	) +++
 	maindiv << (
 	h3 << "The Free Theorem" +++
-	p << "For your type, the following Free Theorem holds:" +++
-	pre << (show (freeTheorem typ))
+	(case ft_full of
+		Left err -> p << "The full Free Theorem deriver failed:" +++
+                            pre << err
+                Right s  -> p << "For your type, the following Free Theorem holds:" +++
+         	            pre << s
+	) +++
+	p << "Specializing relations to functions, canceling irrelvant terms and eta-reduction, this theorem can be written as:" +++
+	pre << show ft_simple
 	) +++
 	maindiv << (
 	h3 << "The counter-example" +++
-	case getComplete' typ of 
-		Left err -> p << "No term could be derived: " +++ err
+	case counter_example of 
+		Left err -> p << "No term could be derived: " +++ pre << err
 		Right (res,used) ->
 			p << ("By disregarding the strictness conditions for the pointed "+++
                               "variables(?), the following term is a counter example:" +++
@@ -105,5 +124,21 @@ generateResult typeStr typ = maindiv << (
 			p << ("Wheres the abstraced variables are chosen as follows:" +++
                               pre << used)
 	)
-
+  where ft_full = let properType = "f :: " ++ case span (/='.') typeStr of
+                                       (s,"")  -> s
+                                       (_,_:s) -> s
+		      (ds,es) = runChecks (parse properType >>= check)
+                      [s]     = filterSignatures ds
+		  in if null es
+                     then case interpret [] BasicSubset s of
+			Nothing -> Left "interpret returned nothing"
+			Just i  -> Right $ render (prettyTheorem [] (asTheorem i)) ++
+			      case unfoldLifts [] i of
+				[] -> ""
+				ls -> "\n\nWhereas the occuring lifts are defined as:\n\n "++
+				      unlines (map (render . prettyUnfoldedLift []) ls)
+                     else Left (unlines (map render es))
+		    
+	ft_simple = freeTheorem typ
+        counter_example = getComplete' typ
 	
