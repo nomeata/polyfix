@@ -1,6 +1,7 @@
-module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,AbsTerm(..),testTerm,getTerm,getComplete,getWithDebug,getIt) where
+module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,AbsTerm(..),testTerm,getTerm,getComplete,getComplete',getWithDebug,getIt) where
 
 import Prelude hiding (Either(..))
+import qualified Prelude as E (Either(..))
 import List
 import qualified Data.Map as Map
 import Control.Monad
@@ -996,6 +997,12 @@ getComplete tau = do {printTyp tau;
 						 printUsedTermCont result;
 						}
 		     }
+
+getComplete' :: Typ -> E.Either String (String, String)
+getComplete' tau = case runM $ alg emptyCont tau emptyTermCont of
+		      Nothing             -> E.Left "No Term."
+		      Just (result,debug) -> E.Right (showTerm (fst result),
+                                                      uncurry showUsedTermCont result)
 
 getWithDebug tau = do {printTyp tau;
 		      putStr "\n";
