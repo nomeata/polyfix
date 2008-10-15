@@ -416,8 +416,8 @@ instance Show BoolExpr where
 			", t" ++
 			show (2*i) ++
 			", " ++
-			(if strict then "strict " else "") ++
-                        "functions g" ++
+			(if strict then "strict " else "(strict) ") ++
+			"functions " ++
 			show i ++
 			" :: t" ++
 			show (2*i-1) ++

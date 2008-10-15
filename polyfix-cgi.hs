@@ -114,8 +114,8 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
 	case counter_example of 
 		Left err -> p << "No term could be derived: " +++ pre << err
 		Right (res,used) ->
-			p << ("By disregarding the strictness conditions for the pointed "+++
-                              "variables(?), the following term is a counter example:" +++
+			p << ("By disregarding the strictness conditions for the chosen "+++
+                              "relations, the following term is a counter example:" +++
                               pre << ("f = " ++ res) ) +++
 			p << ("Wheres the abstraced variables are chosen as follows:" +++
                               pre << used)
