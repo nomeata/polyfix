@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts, PatternSignatures, DeriveDataTypeable #-}
 module ParseType (
 	  parseType
+	, parseType'
 	, instType
 	, unquantify
 	, TypVar(..)
