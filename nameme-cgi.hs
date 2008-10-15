@@ -79,29 +79,22 @@ cssStyle = unlines
         , "p { text-align:justify; }"
         ]
 
-
-askTypeForm = maindiv << p << (
-	"Please enter a function type, prepended with a list of unpointed " +++
-	"type variables and a single dot." +++ br +++
-	input ! [name "type", value "a. (a -> b) -> b"] +++ " " +++
-	submit "submit" "Generate Free Theorem and counter example"
+askDiv v e =  maindiv << (
+	p << ( "Please enter a function type, prepended with a list of type variables, " +++
+	       "whose relations should be allowed to be nonstrict, and a single dot.") +++ 	      p << ( input ! [name "type", value v] +++ " " +++
+ 	       submit "submit" "Generate Free Theorem and counter example" ) +++
+	e
 	)
 
-typeError typeStr err = maindiv << (
-	p << ("Please enter a function type, prepended with a list of unpointed " +++
-	      "type variables and a single dot.") +++
-	p << (input ! [name "type", value typeStr] +++ " " +++
-	      submit "submit" "Generate Free Theorem and counter example") +++
+
+askTypeForm = askDiv "a. (a -> b) -> b" noHtml
+
+typeError typeStr err = askDiv typeStr (
 	p << ("There was a problem parsing your type: " +++
   	      pre << err )
 	)
 
-generateResult typeStr typ = maindiv << (
-	"Please enter a function type, prepended with a list of unpointed " +++
-	"type variables and a single dot." +++ br +++
-	input ! [name "type", value typeStr] +++ " " +++
-	submit "submit" "Generate Free Theorem and counter example"
-	) +++
+generateResult typeStr typ = askDiv typeStr noHtml +++
 	maindiv << (
 	h3 << "The Free Theorem" +++
 	(case ft_full of
