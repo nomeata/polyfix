@@ -23,6 +23,7 @@ import Data.Maybe
 
 data TypVar = TypVar Int        -- alpha, beta etc.
             | TypInst Int Bool  -- t1,t2 etc
+	    | TUnit             -- ()
 	deriving (Show, Eq, Typeable, Data)
 
 instType :: Bool -> Typ -> Typ

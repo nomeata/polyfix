@@ -2,6 +2,7 @@ module Main where
 
 import ParseType (parseType')
 import SimpleFT  (freeTheorem)
+import Expr (specialize)
 import ExFindExtended (getComplete')
 import Language.Haskell.FreeTheorems.Parser.Haskell98 as FTP
 import Language.Haskell.FreeTheorems
@@ -104,7 +105,9 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
          	            pre << s
 	) +++
 	p << "Specializing relations to functions, canceling irrelvant terms and eta-reduction, this theorem can be written as:" +++
-	pre << show ft_simple
+	pre << show ft_simple +++
+	p << "Further specializing all types to (), all strict functions to id and all non-strict functions to const (), this theorem can be written as:" +++
+	pre << show (specialize ft_simple)
 	) +++
 	maindiv << (
 	h3 << "The counter-example" +++

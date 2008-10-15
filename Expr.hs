@@ -32,7 +32,9 @@ data Expr
 	| Lambda TypedExpr Expr
 	| Pair Expr Expr
 	| Map
+	| ConstUnit
 	| EitherMap
+	| EUnit
             deriving (Eq, Typeable, Data)
 
 data LambdaBE = CurriedEquals Typ
@@ -199,19 +201,26 @@ replaceTermBE d r = go
 	go (Condition vs cond concl)
 			   = condition vs (go cond) (go concl)
 	go (UnpackPair v1 v2 e be)
-			   = unpackPair v1 v2 (go' e) (go be)
+			   = unpackPair v1 v2 (goT e) (go be)
 	go (TypeVarInst _ _ _) = error "TypeVarInst not expected here"
 
-	go' :: Data a => a -> a
 	go' = replaceExpr d r
+
+	goT te = te { unTypeExpr = go' (unTypeExpr te) }
 
 	goL (CurriedEquals t)   = (CurriedEquals t)
 	goL (LambdaBE v1 v2 be) = lambdaBE v1 v2 (go be)
 
-replaceExpr :: Data a => Expr -> Expr -> a -> a
-replaceExpr d r = everywhere (mkT go)
-  where go e | e == d    = r 
-             | otherwise = e
+
+replaceExpr :: Expr -> Expr -> Expr -> Expr
+replaceExpr d r = go
+  where go e | e == d    = r
+        go (App e1 e2)   = app' (go e1) (go e2)
+	go (Conc es)     = foldr conc (Conc []) (map go es)
+	go (Lambda te e) = lambda' te (go e)
+	go (Pair e1 e2)  = Pair (go e1) (go e2)
+	go e             = e
+
 
 -- | Is inside the term a definition for the variable?
 findReplacer :: TypedExpr -> BoolExpr -> Maybe (BoolExpr -> BoolExpr)
@@ -249,19 +258,24 @@ app te1 te2 | Arrow t1 t2 <- typeOf te1
 	    , t3          <- typeOf te2 
             , t1 == t3 
             = TypedExpr (app' (unTypeExpr te1) (unTypeExpr te2)) t2
- where app' Map (Conc []) = Conc []   -- map id = id
-       app' (Conc []) v   = v         -- id x   = x
-       app' f v           = App f v
 app te1 te2 | otherwise                          = error $ "Type mismatch in app: " ++
                                                            show te1 ++ " " ++ show te2
 
+app' :: Expr -> Expr -> Expr
+app' Map (Conc []) = Conc []   -- map id = id
+app' ConstUnit v   = EUnit     -- id x   = x
+app' (Conc []) v   = v         -- id x   = x
+app' f v           = App f v
+
 lambda :: TypedExpr -> TypedExpr -> TypedExpr
-lambda tv e = TypedExpr inner (Arrow (typeOf tv) (typeOf e))
-  where inner | (Just e') <- isApplOn (unTypeExpr tv) (unTypeExpr e)
+lambda tv e = TypedExpr (lambda' tv (unTypeExpr e)) (Arrow (typeOf tv) (typeOf e))
+
+lambda' :: TypedExpr -> Expr -> Expr
+lambda' tv e  | (Just e') <- isApplOn (unTypeExpr tv) e
 	      , not (unTypeExpr tv `occursIn` e')
-                          = e'
-	      | tv == e   = Conc []
-              | otherwise = Lambda tv (unTypeExpr e)
+                                     = e'
+	      | unTypeExpr tv == e   = Conc []
+              | otherwise            = Lambda tv e
 
 conc :: Expr -> Expr -> Expr
 conc (Conc xs) (Conc ys) = Conc (xs  ++ ys)
@@ -272,6 +286,15 @@ conc x          y        = Conc ([x,y])
 
 -- Specialization of g'
 
+specialize (TypeVarInst strict i be') = 
+		replaceTermBE (Var (FromTypVar i)) (if strict then Conc [] else ConstUnit) .
+		everywhere (mkT $ go) $
+		be
+	where be = specialize be'
+              go (TypInst i' _) | i' == i = TUnit
+              go tv                       = tv                 
+-- No need to go further once we are through the quantors
+specialize be = be
 
 -- Helpers
 
@@ -322,6 +345,7 @@ instance Show Expr where
 				   showString "," .
 			           showsPrec 0 e2
 	showsPrec _ Map           = showString "map"
+	showsPrec d ConstUnit     = showParen (d>10) $ showString "const ()"
 	showsPrec _ EitherMap     = showString "eitherMap"
 
 showIntercalate :: ShowS -> [ShowS] -> ShowS
@@ -410,6 +434,7 @@ showTypePrec _ Int			    = "Int"
 showTypePrec _ (TVar (TypVar i))            = "a"++show i
 showTypePrec _ (TVar (TypInst i b)) | not b = "t" ++  show (2*i-1)
 	      		            |     b = "t" ++  show (2*i)
+showTypePrec _ (TVar (TUnit))               = "()"
 showTypePrec d (Arrow t1 t2)                = paren (d>9) $ 
 						showTypePrec 10 t1 ++
 						" -> " ++
