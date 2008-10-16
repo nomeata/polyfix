@@ -26,7 +26,6 @@ data EVar = F
 
 data Expr
 	= Var EVar
-	| TheOneFunc
 	| App Expr Expr
 	| Conc [Expr] -- Conc [] is Id
 	| Lambda TypedExpr Expr
@@ -111,11 +110,13 @@ andEither lbe1 lbe2 e1 e2 | Just f1 <- arg1IsFunc lbe1
 			  | otherwise
                           = AndEither lbe1 lbe2 (unTypeExpr e1) (unTypeExpr e2)
 
+arg1IsFunc :: LambdaBE -> Maybe TypedExpr
 arg1IsFunc (CurriedEquals t)    = Just $ TypedExpr (Conc []) (Arrow t t)
 arg1IsFunc (LambdaBE v1 v2 rel) | Just v1' <- defFor v1 rel
                                 = Just (lambda v2 v1')
 	                        | otherwise = Nothing
 
+arg2IsFunc :: LambdaBE -> Maybe TypedExpr
 arg2IsFunc (CurriedEquals t)    = Just $ TypedExpr (Conc []) (Arrow t t)
 arg2IsFunc (LambdaBE v1 v2 rel) | Just v2' <- defFor v2 rel
                                 = Just (lambda v1 v2')
@@ -263,7 +264,7 @@ app te1 te2 | otherwise                          = error $ "Type mismatch in app
 
 app' :: Expr -> Expr -> Expr
 app' Map (Conc []) = Conc []   -- map id = id
-app' ConstUnit v   = EUnit     -- id x   = x
+app' ConstUnit _   = EUnit     -- id x   = x
 app' (Conc []) v   = v         -- id x   = x
 app' f v           = App f v
 
@@ -286,6 +287,7 @@ conc x          y        = Conc ([x,y])
 
 -- Specialization of g'
 
+specialize :: BoolExpr -> BoolExpr
 specialize (TypeVarInst strict i be') = 
 		replaceTermBE (Var (FromTypVar i)) (if strict then Conc [] else ConstUnit) .
 		everywhere (mkT $ go) $
@@ -344,6 +346,7 @@ instance Show Expr where
 			           showsPrec 0 e1 .
 				   showString "," .
 			           showsPrec 0 e2
+	showsPrec _ EUnit         = showString "()"
 	showsPrec _ Map           = showString "map"
 	showsPrec d ConstUnit     = showParen (d>10) $ showString "const ()"
 	showsPrec _ EitherMap     = showString "eitherMap"
@@ -417,7 +420,7 @@ instance Show BoolExpr where
 			show (2*i) ++
 			", " ++
 			(if strict then "strict " else "(strict) ") ++
-			"functions " ++
+			"functions g" ++
 			show i ++
 			" :: t" ++
 			show (2*i-1) ++

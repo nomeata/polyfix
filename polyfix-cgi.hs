@@ -21,7 +21,6 @@ import Network.CGI
 import Data.ByteString.Lazy.UTF8 (fromString)
 import Text.XHtml
 import Control.Monad
-import System.Random (randomRIO)
 import Data.Maybe
 import Text.PrettyPrint.HughesPJ (render)
 
@@ -62,12 +61,16 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
 			p << ("By disregarding the strictness conditions for the chosen "+++
                               "relations, the following term is a counter example:" +++
                               pre << ("f = " ++ res) ) +++
-			p << ("Wheres the abstraced variables are chosen as follows:" +++
+			p << ("Whereas the abstraced variables are chosen as follows:" +++
                               pre << used)
+	) +++
+	maindiv ( p << ("In the simplified theorems, the following custom haskell " +++
+                        "functions might appear:") +++
+		  pre << addDefs
 	)
   where ft_full = let properType = "f :: " ++ case span (/='.') typeStr of
-                                       (s,"")  -> s
-                                       (_,_:s) -> s
+                                       (t,"")  -> t
+                                       (_,_:t) -> t
 		      (ds,es) = runChecks (parse properType >>= check)
                       [s]     = filterSignatures ds
 		  in if null es
@@ -108,8 +111,6 @@ cgiMain = do
 			thespan ! [theclass "subtitle"] << "Counter Examples for Free Theorems"
 		) +++
 		content +++
-		maindiv ( p << ("In the simplified theorems, the following custom haskell functions might appear:") +++
-			  pre << addDefs ) +++
 		maindiv ( p << ("© 2008 Daniel Seidel und Joachim Breitner <" +++
 			      hotlink "mailto:mail@joachim-breitner.de" << "mail@joachim-breitner.de" +++
 			      ">")
