@@ -2,7 +2,7 @@ module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,AbsTerm(..),testTerm,
 
 import Prelude hiding (Either(..))
 import qualified Prelude as E (Either(..))
-import List
+import Data.List
 import qualified Data.Map as Map
 import Control.Monad
 import M

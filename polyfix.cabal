@@ -1,0 +1,40 @@
+name:           polyfix
+version:        0.1
+license:        PublicDomain
+author:         Daniel Seidel, Joachim Breitner
+maintainer:     seideld@tcs.inf.tu-dresden.de
+synopsis:       Counter examples to Free Theorems
+description:
+	Given a Free Theorem, this program calculates a term for which the
+        Free Theorem does not hold if a strictness requirement is relaxed.
+        .
+        It also includes a simple Free Theorem deriver.
+category:       Language
+build-type:	Simple
+cabal-version:  >= 1.2
+
+extra-source-files:
+    TestItExt.hs
+
+library
+    build-depends:
+        base >= 1.0
+      , mtl >= 1.0
+      , haskell-src >= 1.0
+      , haskell-src-exts >= 0.3.9
+      , pretty >= 1.0.0.0
+      , containers >= 0.1.0.1
+      , HUnit >= 1.2
+    exposed-modules:
+        ExFindExtended
+        SimpleFT
+        ParseType
+    other-modules:
+        Expr
+        M
+
+executable polyfix.cgi
+    main-is:
+        polyfix-cgi.hs
+    build-depends:
+        xhtml, cgi, utf8-string, free-theorems >= 0.2.1
