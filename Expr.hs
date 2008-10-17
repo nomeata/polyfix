@@ -22,7 +22,7 @@ typedRight e t = TypedExpr e (instType True t)
 data EVar = F
 	  | FromTypVar Int
           | FromParam Int Bool
-            deriving (Eq, Typeable, Data)
+            deriving (Eq, Ord, Typeable, Data)
 
 data Expr
 	= Var EVar
