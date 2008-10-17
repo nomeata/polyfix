@@ -28,7 +28,7 @@ data Expr
 	= Var EVar
 	| App Expr Expr
 	| Conc [Expr] -- Conc [] is Id
-	| Lambda TypedExpr Expr
+	| Lambda Expr Expr
 	| Pair Expr Expr
 	| Map
 	| Const Expr
@@ -228,10 +228,10 @@ replaceExpr d r = go
   where go e | e == d    = r
         go (App e1 e2)   = app' (go e1) (go e2)
 	go (Conc es)     = foldr conc (Conc []) (map go es)
-	go (Lambda te e) = lambda' te (go e)
+	go (Lambda v e)  = lambda' v (go e)
 	go (Pair e1 e2)  = Pair (go e1) (go e2)
 	go (Const e)     = Const (go e)
-	go (CaseUnit v e) = caseUnit (go v) (go e)
+	go (CaseUnit v e)= caseUnit (go v) (go e)
 	go e             = e
 
 
@@ -275,28 +275,32 @@ app te1 te2 | otherwise                          = error $ "Type mismatch in app
                                                            show te1 ++ " " ++ show te2
 
 app' :: Expr -> Expr -> Expr
+app' (App (App EitherMap f1) f2) Bottom     = Bottom
+app' (App (App EitherMap f1) f2) (ELeft v)  = app' f1 v
+app' (App (App EitherMap f1) f2) (ERight v) = app' f2 v
 app' Bottom    _   = Bottom    -- _|_ x = _|_
-app' (Lambda tv e1) (e2) = replaceExpr (unTypeExpr tv) e2 e1 -- lambda application
+app' (Lambda v e1) (e2) = replaceExpr v e2 e1 -- lambda application
 app' Map (Conc []) = Conc []   -- map id = id
 app' (Const e) _   = e         -- const x y = x
 app' (Conc []) v   = v         -- id x   = x
 app' f v           = App f v
 
 lambda :: TypedExpr -> TypedExpr -> TypedExpr
-lambda tv e = TypedExpr (lambda' tv (unTypeExpr e)) (Arrow (typeOf tv) (typeOf e))
+lambda tv e = TypedExpr (lambda' (unTypeExpr tv) (unTypeExpr e))
+                        (Arrow (typeOf tv) (typeOf e))
 
-lambda' :: TypedExpr -> Expr -> Expr
-lambda' tv e  | e == EUnit           = Const EUnit
-              | (Just e') <- isApplOn (unTypeExpr tv) e
-	      , not (unTypeExpr tv `occursIn` e')
+lambda' :: Expr -> Expr -> Expr
+lambda' v e  | e == EUnit           = Const EUnit
+              | (Just e') <- isApplOn v e
+	      , not (v `occursIn` e')
                                      = e'
-	      | unTypeExpr tv == e   = Conc []
-              | otherwise            = Lambda tv e
+	      | v == e   = Conc []
+              | otherwise            = Lambda v e
 
 conc :: Expr -> Expr -> Expr
 conc (Lambda v (CaseUnit v' e)) (Conc ((Const EUnit):r))
-				| unTypeExpr v == v' = conc (Const e) (Conc r)
-conc (Lambda v (CaseUnit v' e)) (Const EUnit) | unTypeExpr v == v' = Const e
+				| v == v' = conc (Const e) (Conc r)
+conc (Lambda v (CaseUnit v' e)) (Const EUnit) | v == v' = Const e
 conc (Conc xs) (Conc ys)        = Conc (xs  ++ ys)
 conc (Conc xs)  y               = Conc (xs  ++ [y])
 conc x         (Conc ys)        = Conc ([x] ++ ys)
@@ -355,9 +359,9 @@ instance Show Expr where
 	showsPrec d (Conc [e])  = showsPrec d e
 	showsPrec d (Conc es)   = showParen (d>9) $
 		showIntercalate (showString " . ") (map (showsPrec 10) es)
-	showsPrec _ (Lambda tv e) = showParen True $ 
+	showsPrec _ (Lambda v e)  = showParen True $ 
 				    showString "\\" .
-                                    showsPrec 11 tv .
+                                    showsPrec 11 v .
                                     showString " -> ".
 			            showsPrec 0 e 
 	showsPrec _ (Pair e1 e2) = showParen True $ 
