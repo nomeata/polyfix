@@ -32,8 +32,10 @@ data Expr
 	| Pair Expr Expr
 	| Map
 	| ConstUnit
+	| CaseUnit Expr Expr
 	| EitherMap
 	| EUnit
+	| Bottom
             deriving (Eq, Typeable, Data)
 
 data LambdaBE = CurriedEquals Typ
@@ -339,7 +341,7 @@ instance Show Expr where
 		showIntercalate (showString " . ") (map (showsPrec 10) es)
 	showsPrec _ (Lambda tv e) = showParen True $ 
 				    showString "\\" .
-                                    showsPrec 0 tv .
+                                    showsPrec 11 tv .
                                     showString " -> ".
 			            showsPrec 0 e 
 	showsPrec _ (Pair e1 e2) = showParen True $ 
@@ -349,7 +351,13 @@ instance Show Expr where
 	showsPrec _ EUnit         = showString "()"
 	showsPrec _ Map           = showString "map"
 	showsPrec d ConstUnit     = showParen (d>10) $ showString "const ()"
+	showsPrec d (CaseUnit t1 t2) = showParen (d>5) $
+					showString "case " .
+					showsPrec 0 t1 .
+					showString " of () ->  " .
+					showsPrec 11 t2
 	showsPrec _ EitherMap     = showString "eitherMap"
+	showsPrec _ Bottom        = showString "_|_"
 
 showIntercalate :: ShowS -> [ShowS] -> ShowS
 showIntercalate _ []  = id

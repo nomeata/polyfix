@@ -3,7 +3,7 @@ module Main where
 import ParseType (parseType')
 import SimpleFT  (freeTheorem)
 import Expr (specialize)
-import ExFindExtended (getComplete')
+import ExFindExtended (getComplete', getCompleteRaw)
 import Language.Haskell.FreeTheorems.Parser.Haskell98 as FTP
 import Language.Haskell.FreeTheorems
 	( runChecks
@@ -16,6 +16,7 @@ import Language.Haskell.FreeTheorems
 	, prettyUnfoldedLift
 	, LanguageSubset(BasicSubset)
 	)
+import Term2Expr (term2Expr, termCond2Exprs, insertTermsInCondition)
 
 import Network.CGI
 import Data.ByteString.Lazy.UTF8 (fromString)
@@ -23,6 +24,8 @@ import Text.XHtml
 import Control.Monad
 import Data.Maybe
 import Text.PrettyPrint.HughesPJ (render)
+import qualified Data.Map as M
+import Data.Generics
 
 askDiv v e =  maindiv << (
 	p << ( "Please enter a function type, prepended with a list of type variables, " +++
@@ -55,7 +58,7 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
 	) +++
 	maindiv << (
 	h3 << "The counter-example" +++
-	case counter_example of 
+	( case counter_example of 
 		Left err -> p << "No term could be derived: " +++ pre << err
 		Right (res,used) ->
 			p << ("By disregarding the strictness conditions for the chosen "+++
@@ -63,6 +66,16 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
                               pre << ("f = " ++ res) ) +++
 			p << ("Whereas the abstraced variables are chosen as follows:" +++
                               pre << used)
+	) +++
+	h3 << "The raw counter-example" +++
+	case counter_example_raw of 
+		Left err -> p << "No term could be derived: " +++ pre << err
+		Right result ->
+			p << (show result) +++
+			p << (show (term2Expr (fst result))) +++
+			p << (show (termCond2Exprs (snd result))) +++
+			p << (show (insertTermsInCondition result (specialize ft_simple))) +++
+			p << (gshow (insertTermsInCondition result (specialize ft_simple)))
 	) +++
 	maindiv ( p << ("In the simplified theorems, the following custom haskell " +++
                         "functions might appear:") +++
@@ -85,6 +98,7 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
 		    
 	ft_simple = freeTheorem typ
         counter_example = getComplete' typ
+	counter_example_raw = getCompleteRaw typ
 	
 main = runCGI (handleErrors cgiMain)
 

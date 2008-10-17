@@ -1,4 +1,4 @@
-module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,AbsTerm(..),testTerm,getTerm,getComplete,getComplete',getWithDebug,getIt) where
+module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,TermCont,TermPlus,PlusElem(..),AbsTerm(..),testTerm,getTerm,getComplete,getComplete',getCompleteRaw,getWithDebug,getIt) where
 
 import Prelude hiding (Either(..))
 import qualified Prelude as E (Either(..))
@@ -26,7 +26,7 @@ type TermCont = Map.Map TermVar (TermPlus,TermPlus)
 
 newtype TermVar = TermVar Int deriving (Show, Eq, Ord)
 
-data PlusElem = PlusElem TypVar Int
+data PlusElem = PlusElem TypVar Int deriving (Show, Eq)
 
 type Term = AbsTerm ()
 type TermPlus = AbsTerm PlusElem
@@ -999,10 +999,15 @@ getComplete tau = do {printTyp tau;
 		     }
 
 getComplete' :: Typ -> E.Either String (String, String)
-getComplete' tau = case runM $ alg emptyCont tau emptyTermCont of
-		      Nothing             -> E.Left "No Term."
-		      Just (result,debug) -> E.Right (showTerm (fst result),
+getComplete' tau = case getCompleteRaw tau of 
+		      E.Left err          -> E.Left err
+		      E.Right (result)    -> E.Right (showTerm (fst result),
                                                       uncurry showUsedTermCont result)
+
+getCompleteRaw :: Typ -> E.Either String (Term,TermCont)
+getCompleteRaw tau = case runM $ alg emptyCont tau emptyTermCont of
+		      Nothing             -> E.Left "No Term."
+		      Just (result,debug) -> E.Right (result)
 
 getWithDebug tau = do {printTyp tau;
 		      putStr "\n";
