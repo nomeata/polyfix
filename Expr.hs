@@ -31,7 +31,9 @@ data Expr
 	| Lambda TypedExpr Expr
 	| Pair Expr Expr
 	| Map
-	| ConstUnit
+	| Const Expr
+	| ELeft Expr
+	| ERight Expr
 	| CaseUnit Expr Expr
 	| EitherMap
 	| EUnit
@@ -63,6 +65,7 @@ equal' :: Expr -> Expr -> BoolExpr
 equal' e1 e2  | (Just (lf,lv)) <- isFunctionApplication e1
               , (Just (rf,rv)) <- isFunctionApplication e2
               , lv == rv 
+	      , False
 	                                 = equal' lf rf
 	      -- This makes it return True...
 	      | e1 == e2                 = beTrue
@@ -190,6 +193,11 @@ condition vars cond concl | True -- set to false to disable
 -- Nothing left to optizmize
 condition vars cond concl = Condition vars cond concl
 
+
+caseUnit Bottom e = Bottom
+caseUnit EUnit e  = e
+caseUnit v e      = CaseUnit v e
+
 -- | Replaces a Term in a BoolExpr
 replaceTermBE :: Expr -> Expr -> BoolExpr -> BoolExpr
 replaceTermBE d r = go
@@ -222,6 +230,8 @@ replaceExpr d r = go
 	go (Conc es)     = foldr conc (Conc []) (map go es)
 	go (Lambda te e) = lambda' te (go e)
 	go (Pair e1 e2)  = Pair (go e1) (go e2)
+	go (Const e)     = Const (go e)
+	go (CaseUnit v e) = caseUnit (go v) (go e)
 	go e             = e
 
 
@@ -265,8 +275,10 @@ app te1 te2 | otherwise                          = error $ "Type mismatch in app
                                                            show te1 ++ " " ++ show te2
 
 app' :: Expr -> Expr -> Expr
+app' Bottom    _   = Bottom    -- _|_ x = _|_
+app' (Lambda tv e1) (e2) = replaceExpr (unTypeExpr tv) e2 e1 -- lambda application
 app' Map (Conc []) = Conc []   -- map id = id
-app' ConstUnit _   = EUnit     -- id x   = x
+app' (Const e) _   = e         -- const x y = x
 app' (Conc []) v   = v         -- id x   = x
 app' f v           = App f v
 
@@ -274,24 +286,28 @@ lambda :: TypedExpr -> TypedExpr -> TypedExpr
 lambda tv e = TypedExpr (lambda' tv (unTypeExpr e)) (Arrow (typeOf tv) (typeOf e))
 
 lambda' :: TypedExpr -> Expr -> Expr
-lambda' tv e  | (Just e') <- isApplOn (unTypeExpr tv) e
+lambda' tv e  | e == EUnit           = Const EUnit
+              | (Just e') <- isApplOn (unTypeExpr tv) e
 	      , not (unTypeExpr tv `occursIn` e')
                                      = e'
 	      | unTypeExpr tv == e   = Conc []
               | otherwise            = Lambda tv e
 
 conc :: Expr -> Expr -> Expr
-conc (Conc xs) (Conc ys) = Conc (xs  ++ ys)
-conc (Conc xs)  y        = Conc (xs  ++ [y])
-conc x         (Conc ys) = Conc ([x] ++ ys)
-conc x          y        = Conc ([x,y])
+conc (Lambda v (CaseUnit v' e)) (Conc ((Const EUnit):r))
+				| unTypeExpr v == v' = conc (Const e) (Conc r)
+conc (Lambda v (CaseUnit v' e)) (Const EUnit) | unTypeExpr v == v' = Const e
+conc (Conc xs) (Conc ys)        = Conc (xs  ++ ys)
+conc (Conc xs)  y               = Conc (xs  ++ [y])
+conc x         (Conc ys)        = Conc ([x] ++ ys)
+conc x          y               = Conc ([x,y])
 
 
 -- Specialization of g'
 
 specialize :: BoolExpr -> BoolExpr
 specialize (TypeVarInst strict i be') = 
-		replaceTermBE (Var (FromTypVar i)) (if strict then Conc [] else ConstUnit) .
+		replaceTermBE (Var (FromTypVar i)) (if strict then Conc [] else Const EUnit) .
 		everywhere (mkT $ go) $
 		be
 	where be = specialize be'
@@ -350,7 +366,13 @@ instance Show Expr where
 			           showsPrec 0 e2
 	showsPrec _ EUnit         = showString "()"
 	showsPrec _ Map           = showString "map"
-	showsPrec d ConstUnit     = showParen (d>10) $ showString "const ()"
+	showsPrec d (ELeft e)     = showParen (d>10) $ 
+					showString "Left ".
+					showsPrec 11 e
+	showsPrec d (ERight e)    = showParen (d>10) $ 
+					showString "Right ".
+					showsPrec 11 e
+	showsPrec d (Const e)     = showParen (d>10) $ showString "const ".showsPrec 11 e
 	showsPrec d (CaseUnit t1 t2) = showParen (d>5) $
 					showString "case " .
 					showsPrec 0 t1 .

@@ -1,4 +1,4 @@
-module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,TermCont,TermPlus,PlusElem(..),AbsTerm(..),testTerm,getTerm,getComplete,getComplete',getCompleteRaw,getWithDebug,getIt) where
+module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,TermCont,TermPlus,PlusElem(..),AbsTerm(..),testTerm,getTerm,getComplete,showTerm,showUsedTermCont,getCompleteRaw,getWithDebug,getIt) where
 
 import Prelude hiding (Either(..))
 import qualified Prelude as E (Either(..))
@@ -997,12 +997,6 @@ getComplete tau = do {printTyp tau;
 						 printUsedTermCont result;
 						}
 		     }
-
-getComplete' :: Typ -> E.Either String (String, String)
-getComplete' tau = case getCompleteRaw tau of 
-		      E.Left err          -> E.Left err
-		      E.Right (result)    -> E.Right (showTerm (fst result),
-                                                      uncurry showUsedTermCont result)
 
 getCompleteRaw :: Typ -> E.Either String (Term,TermCont)
 getCompleteRaw tau = case runM $ alg emptyCont tau emptyTermCont of

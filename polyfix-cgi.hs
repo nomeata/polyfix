@@ -3,7 +3,7 @@ module Main where
 import ParseType (parseType')
 import SimpleFT  (freeTheorem)
 import Expr (specialize)
-import ExFindExtended (getComplete', getCompleteRaw)
+import ExFindExtended (getCompleteRaw, showTerm, showUsedTermCont)
 import Language.Haskell.FreeTheorems.Parser.Haskell98 as FTP
 import Language.Haskell.FreeTheorems
 	( runChecks
@@ -54,29 +54,26 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
 	p << "Specializing relations to functions, canceling irrelvant terms and eta-reduction, this theorem can be written as:" +++
 	pre << show ft_simple +++
 	p << "Further specializing all types to (), all strict functions to id and all non-strict functions to const (), this theorem can be written as:" +++
-	pre << show (specialize ft_simple)
+	pre << show ft_simple_special
 	) +++
 	maindiv << (
 	h3 << "The counter-example" +++
 	( case counter_example of 
 		Left err -> p << "No term could be derived: " +++ pre << err
-		Right (res,used) ->
+		Right result ->
 			p << ("By disregarding the strictness conditions for the chosen "+++
                               "relations, the following term is a counter example:" +++
-                              pre << ("f = " ++ res) ) +++
+                              pre << ("f = " ++ showTerm (fst result)) ) +++
 			p << ("Whereas the abstraced variables are chosen as follows:" +++
-                              pre << used)
-	) +++
-	h3 << "The raw counter-example" +++
-	case counter_example_raw of 
-		Left err -> p << "No term could be derived: " +++ pre << err
-		Right result ->
-			p << (show result) +++
-			p << (show (term2Expr (fst result))) +++
-			p << (show (termCond2Exprs (snd result))) +++
-			p << (show (insertTermsInCondition result (specialize ft_simple))) +++
-			p << (gshow (insertTermsInCondition result (specialize ft_simple)))
-	) +++
+                              pre << uncurry showUsedTermCont result) +++
+			p << ("Inserting these defintions in the above theorem yields:" +++
+			-- p << (show result) +++
+			-- p << (show (term2Expr (fst result))) +++
+			-- p << (show (termCond2Exprs (snd result))) +++
+			      pre << (show (insertTermsInCondition result ft_simple_special))
+				) 
+			-- p << (gshow (insertTermsInCondition result (specialize ft_simple)))
+	)) +++
 	maindiv ( p << ("In the simplified theorems, the following custom haskell " +++
                         "functions might appear:") +++
 		  pre << addDefs
@@ -97,8 +94,8 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
                      else Left (unlines (map render es))
 		    
 	ft_simple = freeTheorem typ
-        counter_example = getComplete' typ
-	counter_example_raw = getCompleteRaw typ
+	ft_simple_special = specialize ft_simple
+        counter_example = getCompleteRaw typ
 	
 main = runCGI (handleErrors cgiMain)
 
