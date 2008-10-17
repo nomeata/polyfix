@@ -297,9 +297,11 @@ app' (App (App EitherMap f1) f2) (ELeft v)  = app' f1 v
 app' (App (App EitherMap f1) f2) (ERight v) = app' f2 v
 app' Bottom    _   = Bottom    -- _|_ x = _|_
 app' (Lambda v e1) (e2) = replaceExpr v e2 e1 -- lambda application
+app' (App Map f) (Singleton v) = Singleton (app' f v)
 app' Map (Conc []) = Conc []   -- map id = id
 app' (Const e) _   = e         -- const x y = x
 app' (Conc []) v   = v         -- id x   = x
+app' (Conc xs) v   = foldr app' v xs
 app' f v           = App f v
 
 lambda :: TypedExpr -> TypedExpr -> TypedExpr
@@ -318,7 +320,8 @@ conc :: Expr -> Expr -> Expr
 conc (Lambda v (CaseUnit v' e)) (Conc ((Const EUnit):r))
 				| v == v' = conc (Const e) (Conc r)
 conc (Lambda v (CaseUnit v' e)) (Const EUnit) | v == v' = Const e
-conc (Conc xs) (Conc ys)        = Conc (xs  ++ ys)
+conc (Conc xs) (Conc ys)        | [x] <- xs ++ ys	= x
+                                | otherwise		= Conc (xs  ++ ys)
 conc (Conc xs)  y               = Conc (xs  ++ [y])
 conc x         (Conc ys)        = Conc ([x] ++ ys)
 conc x          y               = Conc ([x,y])
