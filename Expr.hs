@@ -113,7 +113,16 @@ andEither lbe1 lbe2 e1 e2 | Just f1 <- arg1IsFunc lbe1
                           , Just f2 <- arg2IsFunc lbe2
 			  = eitherE f1 f2 e1 `equal` e2
 			  | otherwise
-                          = AndEither lbe1 lbe2 (unTypeExpr e1) (unTypeExpr e2)
+                          = andEither' lbe1 lbe2 (unTypeExpr e1) (unTypeExpr e2)
+
+andEither' :: LambdaBE -> LambdaBE -> Expr -> Expr -> BoolExpr
+andEither' (LambdaBE v1 v2 rel) _ (ELeft e1) (ELeft e2)
+       = replaceTermBE (unTypeExpr v1) e1 $ replaceTermBE (unTypeExpr v2) e2 $ rel
+andEither' _ (LambdaBE v1 v2 rel) (ERight e1) (ERight e2)
+       = replaceTermBE (unTypeExpr v1) e1 $ replaceTermBE (unTypeExpr v2) e2 $ rel
+andEither' lbe1 lbe2 e1 e2
+       = AndEither lbe1 lbe2 e1 e2
+
 
 arg1IsFunc :: LambdaBE -> Maybe TypedExpr
 arg1IsFunc (CurriedEquals t)    = Just $ TypedExpr (Conc []) (Arrow t t)
@@ -208,7 +217,7 @@ replaceTermBE d r = go
         go (AllZipWith lbe e1 e2) 
                            = AllZipWith (goL lbe) (go' e1) (go' e2)
         go (AndEither lbe1 lbe2 e1 e2)
-			   = AndEither (goL lbe1) (goL lbe2) (go' e1) (go' e2)
+			   = andEither' (goL lbe1) (goL lbe2) (go' e1) (go' e2)
 	go (Condition vs cond concl)
 			   = condition vs (go cond) (go concl)
 	go (UnpackPair v1 v2 e be)
