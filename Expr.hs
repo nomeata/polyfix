@@ -36,7 +36,10 @@ data Expr
 	| ERight Expr
 	| CaseUnit Expr Expr
 	| EitherMap
+	| HeadMap
 	| EUnit
+	| Singleton Expr
+	| Zero
 	| Bottom
             deriving (Eq, Typeable, Data)
 
@@ -218,6 +221,9 @@ replaceTermBE d r = go
                            = AllZipWith (goL lbe) (go' e1) (go' e2)
         go (AndEither lbe1 lbe2 e1 e2)
 			   = andEither' (goL lbe1) (goL lbe2) (go' e1) (go' e2)
+	go c@(Condition vs cond concl) -- shadowed definition
+			   | d `elem` map unTypeExpr vs 
+			   = c
 	go (Condition vs cond concl)
 			   = condition vs (go cond) (go concl)
 	go (UnpackPair v1 v2 e be)
@@ -284,6 +290,8 @@ app te1 te2 | otherwise                          = error $ "Type mismatch in app
                                                            show te1 ++ " " ++ show te2
 
 app' :: Expr -> Expr -> Expr
+app' (App HeadMap f) Bottom                 = Bottom
+app' (App HeadMap f) (Singleton e)          = app' f e
 app' (App (App EitherMap f1) f2) Bottom     = Bottom
 app' (App (App EitherMap f1) f2) (ELeft v)  = app' f1 v
 app' (App (App EitherMap f1) f2) (ERight v) = app' f2 v
@@ -377,7 +385,9 @@ instance Show Expr where
 			           showsPrec 0 e1 .
 				   showString "," .
 			           showsPrec 0 e2
+	showsPrec _ Zero          = showString "0"
 	showsPrec _ EUnit         = showString "()"
+	showsPrec _ (Singleton e) = showString "[" . showsPrec 0 e . showString "]"
 	showsPrec _ Map           = showString "map"
 	showsPrec d (ELeft e)     = showParen (d>10) $ 
 					showString "Left ".
@@ -392,6 +402,7 @@ instance Show Expr where
 					showString " of () ->  " .
 					showsPrec 11 t2
 	showsPrec _ EitherMap     = showString "eitherMap"
+	showsPrec _ HeadMap       = showString "headMap"
 	showsPrec _ Bottom        = showString "_|_"
 
 showIntercalate :: ShowS -> [ShowS] -> ShowS
