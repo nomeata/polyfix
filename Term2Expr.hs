@@ -1,6 +1,6 @@
 {-# LANGUAGE PatternGuards #-}
 
-module Term2Expr where
+module Term2Expr (insertTermsInCondition, term2Expr, termCond2Exprs) where
 
 import ExFindExtended
 import Expr

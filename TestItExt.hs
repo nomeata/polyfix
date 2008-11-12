@@ -1,3 +1,4 @@
+module TestItExt where
 import Test.HUnit
 import ExFindExtended
 import Prelude hiding (Either(..))

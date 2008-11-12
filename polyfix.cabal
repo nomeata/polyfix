@@ -15,6 +15,7 @@ cabal-version:  >= 1.2
 
 extra-source-files:
     TestItExt.hs
+    testcgi.py
 
 library
     build-depends:
@@ -29,6 +30,7 @@ library
         ExFindExtended
         SimpleFT
         ParseType
+        Term2Expr
     other-modules:
         Expr
         M

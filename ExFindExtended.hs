@@ -64,6 +64,25 @@ emptyCont = Cont [] [] [] []
 emptyTermCont :: TermCont
 emptyTermCont = Map.empty
 
+term2PlusTerm :: Term -> TermPlus
+term2PlusTerm t =
+    case t of
+      Var v -> Var v   
+      Abs v tau t1 -> Abs v tau (term2PlusTerm t1) 
+      App t1 t2 -> App (term2PlusTerm t1) (term2PlusTerm t2)
+      TAbs v t1 -> TAbs v (term2PlusTerm t1)
+      Nil tau -> Nil tau
+      Cons t1 t2 -> Cons (term2PlusTerm t1) (term2PlusTerm t2) 
+      Case t1 t2 v t3 -> Case (term2PlusTerm t1) (term2PlusTerm t2) v (term2PlusTerm t3)
+      Bottom  tau -> Bottom tau
+      Case1 t1 t2 t3 t4 -> Case1 (term2PlusTerm t1) (term2PlusTerm t2) (term2PlusTerm t3) (term2PlusTerm t4)
+      Zero -> Zero
+      Pair t1 t2 -> Pair (term2PlusTerm t1) (term2PlusTerm t2)
+      PCase t1 v1 v2 t2 -> PCase (term2PlusTerm t1) v1 v2 (term2PlusTerm t2)
+      ECase t1 v1 t2 v2 t3 -> ECase (term2PlusTerm t1) v1 (term2PlusTerm t2) v2 (term2PlusTerm t3)
+      Right t1 -> term2PlusTerm t1
+      Left  t1 -> term2PlusTerm t1
+
 updateTVarStar (Cont tVars tVarsStar vars varsStar) tv = Cont tVars (tv:tVarsStar) vars varsStar
 
 updateTVar (Cont tVars tVarsStar vars varsStar) tv = Cont (tv:tVars) tVarsStar vars varsStar
@@ -130,9 +149,9 @@ typeCheckList tau = case tau of
                      List _ -> True
                      _      -> False
 
-typeCheckArrowUnPointedArg tvars tau = case tau of
-                                      Arrow tau1 _ -> unpointed tvars tau1
-                                      _            -> False
+typeCheckArrowUnPointedArgPointedRes tvars tau = case tau of
+					           Arrow tau1 tau2 -> unpointed tvars tau1 && (not (unpointed tvars tau2))
+                                                   _               -> False
 
 typeCheckArrowArgArrow tau = case tau of
 			      Arrow tau1 _ -> case tau1 of
@@ -225,6 +244,112 @@ makePlusElem tau = case tau of
 						       Just t2 -> Just (Right t2)
 						       _       -> Nothing
 		   _                 -> Nothing
+
+--the function equals the lemma about the function construction g_x(tau,t1), g'_x'(tau,t2)
+--              (x_tau2,x'_tau2) -> tau -> (t1,t2) -> (g,g')
+makeFuncPair :: TermCont -> Cont -> (TermPlus,TermPlus) -> Typ -> Typ -> (TermPlus,TermPlus) -> M (TermPlus,TermPlus)
+makeFuncPair tc gamma resPair resTyp tau terms = makeFuncPair' tc gamma resPair resTyp tau tau ([],[]) terms
+
+makeFuncPair' :: TermCont -> Cont -> (TermPlus,TermPlus) -> Typ -> Typ -> Typ -> ([TermPlus],[TermPlus]) -> (TermPlus,TermPlus) -> M (TermPlus,TermPlus)
+makeFuncPair' tc gamma resPair resTyp tauAll tau args terms =
+    let (z,z') = resPair in
+    case tau of
+      TVar beta    -> case makePlusPair tau of
+		       Just (u,v) -> do {i <- newInt;
+					 let w  = TermVar i
+					     g' = Abs w tauAll (Case1 (apply (Var w) (snd args)) v z' z') in
+					 if unpointed (tVars gamma) tau
+					 then return (Abs w tauAll z, g')
+					 else return (Abs w tauAll (Case1 (apply (Var w) (fst args)) u z z), g')
+					}
+      Int          -> do {i <- newInt;
+			  let w  = TermVar i in
+			  return (Abs w tauAll (Case1 (apply (Var w) (fst args)) Zero z z), Abs w tauAll (Case1 (apply (Var w) (snd args)) Zero z' z'))
+			 }
+
+      List tau'    -> case snd terms of
+		        Bottom _ -> do{i <- newInt;
+				       j <- newInt;
+				       let w   = TermVar i
+				           h   = TermVar j 
+				       in
+				       return (Abs w tauAll (Case (apply (Var w) (fst args)) z h z), Abs w tauAll (Case (apply (Var w) (snd args)) z' h z'))
+				       }
+			Cons x _ -> let Cons y _ = snd terms in
+				    do{i <- newInt;
+				       j <- newInt;				       
+				       (g,g') <- makeFuncPair' tc gamma resPair resTyp tauAll tau' ([],[]) (x,y);
+				       let w   = TermVar i
+				           u   = TermVar j in
+				       return (Abs w tauAll (Case1 (apply (Var w) (fst args)) (Cons (Var u) (Nil tau')) (App g  (Var u)) z),
+					       Abs w tauAll (Case1 (apply (Var w) (snd args)) (Cons (Var u) (Nil tau')) (App g' (Var u)) z'))
+				      }
+  
+      TPair tau' tau'' -> case snd terms of
+			    Bottom _ -> do{i <- newInt;
+					   j <- newInt;
+					   k <- newInt;
+					   let w = TermVar i 
+					       x = TermVar j
+					       y = TermVar k
+					   in
+					   return (Abs w tauAll (PCase (apply (Var w) (fst args)) x y (App (App z (Var x)) (Var y))), Abs w tauAll (PCase (apply (Var w) (fst args)) x y (App (App z' (Var x)) (Var y))))
+					  }
+                            Pair t21 t22 -> let Pair t11 t12 = fst terms in
+					    do{i <- newInt;
+					       j <- newInt;
+					       k <- newInt;
+					       l <- newInt;
+					       let x = TermVar j
+					           y = TermVar k
+					           u = TermVar l
+					           w = TermVar i 					       
+					       in
+					       do{(k,k') <- case t22 of
+					                      {Bottom _ -> if (unpointed (tVars gamma) tau'')
+					                                   then makeFuncPair' tc gamma resPair resTyp tau'' tau'' ([],[]) (t12,t22)
+					                                   else return (Abs u tau'' z, Abs u tau'' z');
+                                                               _        -> makeFuncPair' tc gamma resPair resTyp tau'' tau'' ([],[]) (t12,t22)};
+					          (h,h') <- case t21 of
+					                      {Bottom _ -> if (unpointed (tVars gamma) tau'')
+					                                   then makeFuncPair' tc gamma (k,k') (Arrow tau'' resTyp) tau' tau' ([],[]) (t11,t21)
+					                                   else return (Abs x tau' (Abs y tau'' (App k (Var y))), Abs x tau' (Abs y tau'' (App k' (Var y))));
+					                       _        -> makeFuncPair' tc gamma (k,k') (Arrow tau'' resTyp) tau' tau' ([],[]) (t11,t21)};   
+						  return (Abs w tauAll (PCase(apply (Var w) (fst args)) x y (App (App h (Var x)) (Var y))), Abs w tauAll (PCase (apply (Var w) (fst args)) x y (App (App h' (Var x)) (Var y))))
+						 }
+					      }
+      TEither tau' tau'' -> do{i <- newInt;
+			       j <- newInt;
+			       let w = TermVar i
+			           x = TermVar j
+			       in
+			       case snd terms of
+                                 Bottom _ -> return (Abs w tauAll (ECase (apply (Var w) (fst args)) x (fst resPair) x (fst resPair)),
+					             Abs w tauAll (ECase (apply (Var w) (fst args)) x (fst resPair) x (snd resPair)))
+			         Left t2  -> case fst terms of
+                                               Left t1  -> do{(g,g') <- makeFuncPair' tc gamma resPair resTyp tau' tau' ([],[]) (t1,t2);
+			                                      return (Abs w tauAll (ECase (apply (Var w) (fst args)) x g  x (fst resPair)),
+					                              Abs w tauAll (ECase (apply (Var w) (fst args)) x g' x (snd resPair)))
+							     }
+			                       Right t1 -> return (Abs w tauAll (ECase (apply (Var w) (fst args)) x (Bottom resTyp)  x (fst resPair)),
+					                           Abs w tauAll (ECase (apply (Var w) (fst args)) x (Bottom resTyp)  x (snd resPair)))
+			         Right t2  -> case fst terms of
+                                                Right t1   -> do{(g,g') <- makeFuncPair' tc gamma resPair resTyp tau'' tau'' ([],[]) (t1,t2);
+								 return (Abs w tauAll (ECase (apply (Var w) (fst args)) x (fst resPair) x g),
+					                                 Abs w tauAll (ECase (apply (Var w) (fst args)) x (snd resPair) x g'))
+								}
+			                        Left t1    -> return (Abs w tauAll (ECase (apply (Var w) (fst args)) x (fst resPair) x (Bottom resTyp)),
+					                              Abs w tauAll (ECase (apply (Var w) (fst args)) x (snd resPair) x (Bottom resTyp)))
+			      }
+      Arrow tau' tau'' -> let Abs x _ t1 = fst terms
+			      t2 = case snd terms of
+				     Abs _ _ t  -> t
+				     Bottom _   -> Bottom tau''
+			      Just (u,u') = if Map.member x tc then Just (fst (trace "Map.!-check: lArrowArrow g-construct fst y (list case Arrow)" (tc Map.! x)),snd (trace "Map.!-check: lArrowArrow g-construct snd y (list case Arrow)" (tc Map.! x)))
+					    else makePlusPair tau'
+                          in
+			  makeFuncPair' tc gamma resPair resTyp tauAll tau'' (u:(fst args),u':(snd args)) (t1,t2)
+
 
 -------Regeln der ersten Phase-------------
 
@@ -463,7 +588,7 @@ rE2 tau = case tau of
 ---TODO END---
 
 lFixArrowStar :: Cont -> [M ((Cont, Term -> Term),(TypedVar,TypedVar))]
-lFixArrowStar gamma = let l = findallWithTVars typeCheckArrowUnPointedArg (tVars gamma) (vars gamma) in
+lFixArrowStar gamma = let l = findallWithTVars typeCheckArrowUnPointedArgPointedRes (tVars gamma) (vars gamma) in
                           map makeone l
 		          where makeone = \var -> let Arrow tau1 tau2 = snd var in
 					               do {i <- newAux;
@@ -471,23 +596,23 @@ lFixArrowStar gamma = let l = findallWithTVars typeCheckArrowUnPointedArg (tVars
 							    return (((updateVarStar (removeVar gamma (fst var)) x tau2)
 							             , \m -> subst m (App (Var (fst var)) (Bottom tau1)) x),((x,tau2),var))
 							  }
-lFixArrowStar_tc_update :: TermCont -> TermVar -> TypedVar -> TypedVar -> TermCont
-lFixArrowStar_tc_update tc x y f = let Arrow t1 t2 = snd f
-				       ana = lFixArrowStar_typeAnalyse t1 ([],[]) 
-				       (u,u') = if Map.member (fst y) tc 
-						then trace "LFIXARROWSTAR: y in Map" (tc Map.! (fst y)) 
-						else trace "LFIXARROWSTAR: y NOT in Map"
-						     (case makePlusPair (snd y) of 
-						     Just p -> p) 
-				   in
-				   case makePlusPair (snd ana) of
-				   Just (z,_) -> Map.insert (fst f) (Abs x t1 u, Abs x t1 (Case1 (apply (Var x) (fst (fst ana))) z u' u')) tc
+lFixArrowStar_tc_update :: TermCont -> Cont -> TermVar -> TypedVar -> TypedVar -> M TermCont
+lFixArrowStar_tc_update tc gamma x y f = let Arrow t1 t2 = snd f 
+				             (u,u') = if Map.member (fst y) tc 
+					              then trace "LFIXARROWSTAR: y in Map" (tc Map.! (fst y)) 
+						      else trace "LFIXARROWSTAR: y NOT in Map"
+						           (case makePlusPair (snd y) of 
+						            Just p -> p) 	     in
+                                         do{(g,g') <- makeFuncPair tc gamma (u,u') t2 t1 (Bottom t1, Bottom t1);
+					    return (Map.insert (fst f) (g,g') tc)
+					   }
 
-lFixArrowStar_typeAnalyse :: Typ -> ([TermPlus],[TermPlus]) -> (([TermPlus],[TermPlus]),Typ)
-lFixArrowStar_typeAnalyse tau args = case tau of
-				     TVar t      -> (args,tau)
-				     Arrow t1 t2 -> case makePlusPair t1 of
-                                                    Just (x,y) -> lFixArrowStar_typeAnalyse t2 (x:(fst args), y:(snd args))
+--lFixArrowStar_typeAnalyse :: Typ -> ([TermPlus],[TermPlus]) -> (([TermPlus],[TermPlus]),Typ)
+--lFixArrowStar_typeAnalyse tau args = case tau of
+--				     TVar t      -> (args,tau)
+--				     Arrow t1 t2 -> case makePlusPair t1 of
+--                                                    Just (x,y) -> lFixArrowStar_typeAnalyse t2 (x:(fst args), y:(snd args))
+
 --lArrowArrow in der Variante ohne g.
 lArrowArrow :: Cont -> [M (((Cont, Typ), Cont, Term -> Term -> Term), ([TypedVar],TypedVar))]
 lArrowArrow gamma = 
@@ -508,51 +633,18 @@ lArrowArrow gamma =
 lArrowArrow_tc_update :: TermCont -> Cont -> Term -> TypedVar -> TypedVar -> TypedVar -> M TermCont
 lArrowArrow_tc_update tc gamma m1 w y f = 
     let Arrow t12 t3 = snd f 
-	Arrow t1  t2 = t12 in
+	Arrow t1  t2 = t12
+	Just resPair = if Map.member (fst y) tc then Just (fst (trace "Map.!-check: lArrowArrow g-construct fst y (else)" (tc Map.! (fst y))), snd (trace "Map.!-check: lArrowArrow g-construct snd y" (tc Map.! (fst y))))
+		       else trace "lArrowArrow not used" $ makePlusPair (snd y)
+    in
     do {i <- newInt;
-	(g,g') <- (lArrowArrow_construct_g tc gamma t2 t2 ([],[]) m1 y);
+	(g,g') <- makeFuncPair tc gamma resPair t3 t2 (term2PlusTerm(m1),term2PlusTerm(m1));
 	let u = TermVar i 
 	    Just (z,z') = if Map.member (fst w) tc then Just (fst (trace "Map.!-check: lArrowArrow fst w" (tc Map.! (fst w))), snd (trace "Map.!-check: lArrowArrow snd w" (tc Map.! (fst w))))
 	                  else makePlusPair $ snd w
 	in
         return (Map.insert (fst f) (Abs u t12 (App g (App (Var u) z)), Abs u t12 (App g' (App (Var u) z'))) tc)
        }
-
-lArrowArrow_construct_g :: TermCont -> Cont -> Typ -> Typ -> ([TermPlus],[TermPlus]) -> Term -> TypedVar -> M (TermPlus,TermPlus)
-lArrowArrow_construct_g tc gamma tau tau1 args m1 y = 
-    let Just (z,z') = if Map.member (fst y) tc then Just (fst (trace "Map.!-check: lArrowArrow g-construct fst y (else)" (tc Map.! (fst y))), snd (trace "Map.!-check: lArrowArrow g-construct snd y" (tc Map.! (fst y))))
-		      else trace "lArrowArrow not used" $ makePlusPair (snd y)
-    in
-    case tau1 of
-      TVar beta    -> case makePlusPair tau1 of
-		       Just (u,v) -> do {i <- newInt;
-					 let w  = TermVar i
-					     g' = Abs w tau (Case1 (apply (Var w) (snd args)) v z' z') in
-					 if unpointed (tVars gamma) tau
-					 then return (Abs w tau z, g')
-					 else return (Abs w tau (Case1 (apply (Var w) (fst args)) u z z), g')
-					}
-      List tau'    -> case m1 of
-		        Bottom _ -> do{i <- newInt;
-				       j <- newInt;
-				       let w   = TermVar i
-				           h   = TermVar j 
-				       in
-				       return (Abs w tau (Case (apply (Var w) (fst args)) z h z), Abs w tau (Case (apply (Var w) (snd args)) z' h z'))
-				       }
-			Cons x _ -> do{i <- newInt;
-				       j <- newInt;
-				       (g,g') <- lArrowArrow_construct_g tc gamma tau' tau' ([],[]) x y;
-				       let w   = TermVar i
-				           u   = TermVar j in
-				       return (Abs w tau (Case1 (apply (Var w) (fst args)) (Cons (Var u) (Nil tau')) (App g  (Var u)) z),
-					       Abs w tau (Case1 (apply (Var w) (snd args)) (Cons (Var u) (Nil tau')) (App g' (Var u)) z'))
-				      }
-      Arrow tau' tau'' -> let Abs x _ t = m1 
-			      Just (u,u') = if Map.member x tc then Just (fst (trace "Map.!-check: lArrowArrow g-construct fst y (list case Arrow)" (tc Map.! x)),snd (trace "Map.!-check: lArrowArrow g-construct snd y (list case Arrow)" (tc Map.! x)))
-					    else makePlusPair tau'
-                          in
-			  lArrowArrow_construct_g tc gamma tau tau'' (u:(fst args),u':(snd args)) t y
 
 lFixArrow :: Cont -> [M ((Cont, Term -> Term),(TypedVar,TypedVar))]
 lFixArrow gamma = 
@@ -606,25 +698,28 @@ laArrowStar2 gamma = checkall (findall typeCheckArrow (vars gamma))
 		     where checkall xs =
 			       case xs of
 				 []  -> Nothing
-			         ((f, Arrow tau1 tau2):ys) -> case findfirstSpecialType (varsStar gamma) tau1 of
-                                                                Nothing     -> checkall ys
-								Just (x,_)  -> Just (do {i <- newAux;
-										     let y = TermVar i in
-										     return ((updateVarStar (removeVar gamma f) y tau2, \m -> subst m (App (Var f) (Var x)) y),([(x,tau1),(y,tau2)],(f,Arrow tau1 tau2)))
+			         ((f, Arrow tau1 tau2):ys) -> if unpointed (tVars gamma) tau2 
+							      then checkall ys
+							      else case findfirstSpecialType (varsStar gamma) tau1 of
+							             Nothing     -> checkall ys
+								     Just (x,_)  -> Just (do {i <- newAux;
+											      let y = TermVar i in
+											      return ((updateVarStar (removeVar gamma f) y tau2, \m -> subst m (App (Var f) (Var x)) y),([(x,tau1),(y,tau2)],(f,Arrow tau1 tau2)))
 											})
------------------------------------              x*          y*          f           -------- 
-laArrowStar2_tc_update :: TermCont -> TermVar -> TypedVar -> TypedVar -> TypedVar -> TermCont
-laArrowStar2_tc_update tc z x y f = let Just (u,u') = if (Map.member (fst y) tc) then Just (fst (trace "Map.!-check: laArrowStar2 fst y (TVar)" (tc Map.! (fst y))), snd (trace "Map.!-check: laArrowStar2 snd y (TVar)" (tc Map.! (fst y))))
-						      else makePlusPair (snd y) 
-                                        ana = laArrowStar2_typeAnalyse (snd x) ([],[]) in
-					case (snd ana) of
-					TVar t  -> let Just (a,a') = makePlusPair (TVar t) in
-					           Map.insert (fst f) (Abs z (snd x) (Case1 (apply (Var z) (fst (fst ana))) a u u), Abs z (snd x) (Case1 (apply (Var z) (snd (fst ana))) a' u' u')) tc
-					List t  -> Map.insert (fst f) (Abs z (snd x) (Case1 (apply (Var z) (fst (fst ana))) (Nil (snd y)) u u), Abs z (snd x) (Case1 (apply (Var z) (snd (fst ana))) (Nil (snd y)) u' u')) tc
-														  
+-----------------------------------                      x*          y*          f           -------- 
+laArrowStar2_tc_update :: TermCont -> Cont -> TermVar -> TypedVar -> TypedVar -> TypedVar -> M TermCont
+laArrowStar2_tc_update tc gamma z x y f = let Just (u,u') = if (Map.member (fst x) tc) then Just (fst (trace "Map.!-check: laArrowStar2 fst x (TVar)" (tc Map.! (fst x))), snd (trace "Map.!-check: laArrowStar2 snd x (TVar)" (tc Map.! (fst x))))
+						            else makePlusPair (snd x) 
+					      Just (v,v') = if (Map.member (fst y) tc) then Just (fst (trace "Map.!-check: laArrowStar2 fst y (TVar)" (tc Map.! (fst y))), snd (trace "Map.!-check: laArrowStar2 snd y (TVar)" (tc Map.! (fst y))))
+							    else makePlusPair (snd y)
+					  in
+				          do{fPair <- (makeFuncPair tc gamma (v,v') (snd y) (snd x) (u,Bottom (snd x)));
+					     return (Map.insert (fst f) fPair tc)
+					    }
+
 laArrowStar2_typeAnalyse :: Typ -> ([TermPlus],[TermPlus]) -> (([TermPlus],[TermPlus]),Typ)
 laArrowStar2_typeAnalyse tau args = case tau of
-				    TVar t       -> (args, tau)
+				    TVar t      -> (args, tau)
 				    Arrow t1 t2 -> case makePlusPair t1 of
 						   Just (x,y) -> laArrowStar2_typeAnalyse t2 (x:(fst args), y:(snd args))
 				    List t      -> (args, tau)
@@ -864,14 +959,15 @@ alg1_RE2 gamma tau termCont = case rE2 tau of
 					            return (f t,c)
 						   }
 					
-alg1_LFixArrowStar :: Cont -> Typ -> TermCont -> M (Term,TermCont)
+alg1_LFixArrowStar :: Cont -> Typ -> TermCont -> M (Term, TermCont)
 alg1_LFixArrowStar gamma tau termCont = foldr choice (alg1_LArrowArrow gamma tau termCont) (map trysubderivations (lFixArrowStar gamma))
 			              where trysubderivations = \l -> do {((gamma', f),(y,g)) <- l; 
 									  track (makeTrackString "LFix->*" gamma' tau);
 									  (t,c) <- (alg2 gamma' tau termCont);
 									  i <- newInt;
 									  let x = TermVar i in
-								          return (f t, lFixArrowStar_tc_update c x y g)
+									  do{tc <- lFixArrowStar_tc_update c gamma x y g;
+								          return (f t, tc)}
 									 }
 
 alg1_LArrowArrow :: Cont -> Typ -> TermCont -> M (Term,TermCont)
@@ -929,7 +1025,9 @@ alg2_LaArrowStar2 gamma tau termCont = case laArrowStar2 gamma of
 							(t,c) <- (alg2 gamma' tau termCont);
 							i <- newInt;
 							let u = TermVar i in
-							return (f t, laArrowStar2_tc_update c u x y g)
+							do{tc <- laArrowStar2_tc_update c gamma u x y g;
+							   return (f t, tc)
+							  }
 						       }
 
 alg2_LIStar :: Cont -> Typ -> TermCont -> M (Term,TermCont)
@@ -944,7 +1042,7 @@ alg2_LIStar gamma tau termCont = case lIStar gamma tau of
 alg2_LPStar gamma tau termCont = case lPStar gamma of
 			          Nothing   -> alg2_LEStar1 gamma tau termCont
 			          Just comp -> do {((gamma', f),(h,p)) <- comp;
-						   track (makeTrackString "LP*2" gamma' tau);
+						   track (makeTrackString "LP*" gamma' tau);
 						   (t,c) <- (alg2 gamma' tau termCont);
 						   return (f t, lPStar_tc_update c h p)
 						  }
@@ -1002,6 +1100,7 @@ getCompleteRaw :: Typ -> E.Either String (Term,TermCont)
 getCompleteRaw tau = case runM $ alg emptyCont tau emptyTermCont of
 		      Nothing             -> E.Left "No Term."
 		      Just (result,debug) -> E.Right (result)
+
 
 getWithDebug tau = do {printTyp tau;
 		      putStr "\n";
