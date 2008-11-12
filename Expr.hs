@@ -294,8 +294,8 @@ app' :: Expr -> Expr -> Expr
 app' (App HeadMap f) Bottom                 = Bottom
 app' (App HeadMap f) (Singleton e)          = app' f e
 app' (App (App EitherMap f1) f2) Bottom     = Bottom
-app' (App (App EitherMap f1) f2) (ELeft v)  = app' f1 v
-app' (App (App EitherMap f1) f2) (ERight v) = app' f2 v
+app' (App (App EitherMap f1) f2) (ELeft v)  = ELeft (app' f1 v)
+app' (App (App EitherMap f1) f2) (ERight v) = ERight (app' f2 v)
 app' Bottom    _   = Bottom    -- _|_ x = _|_
 app' (Lambda v e1) (e2) = replaceExpr v e2 e1 -- lambda application
 app' (App Map f) (Singleton v) = Singleton (app' f v)
