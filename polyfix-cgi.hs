@@ -81,13 +81,15 @@ generateResult typeStr typ = askDiv typeStr noHtml +++
   where ft_full = let properType = "f :: " ++ case span (/='.') typeStr of
                                        (t,"")  -> t
                                        (_,_:t) -> t
-		      (ds,es) = runChecks (parse properType >>= check)
+		      either  = "data Either a b = Left a | Right b"
+		      parse_input = unlines [either, properType]
+		      (ds,es) = runChecks (parse parse_input >>= check)
                       [s]     = filterSignatures ds
 		  in if null es
-                     then case interpret [] BasicSubset s of
+                     then case interpret ds BasicSubset s of
 			Nothing -> Left "interpret returned nothing"
 			Just i  -> Right $ render (prettyTheorem [] (asTheorem i)) ++
-			      case unfoldLifts [] i of
+			      case unfoldLifts ds i of
 				[] -> ""
 				ls -> "\n\nWhereas the occuring lifts are defined as:\n\n "++
 				      unlines (map (render . prettyUnfoldedLift []) ls)
