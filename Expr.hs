@@ -84,9 +84,13 @@ isFunctionApplication (App f e') | (Just (inner,v)) <- isFunctionApplication e'
 isFunctionApplication _          = Nothing
 
 
+unpackPair :: TypedExpr -> TypedExpr -> TypedExpr -> BoolExpr -> BoolExpr
+-- | if the te is already a tuple, then replace the variables
+unpackPair v1 v2 te be | Pair pe1 pe2 <- unTypeExpr te
+                       = replaceTermBE (unTypeExpr v1) pe1 $
+                         replaceTermBE (unTypeExpr v2) pe2 $ be
 -- | If both bound variables are just functions, we can replace this
 --   by a comparison
-unpackPair :: TypedExpr -> TypedExpr -> TypedExpr -> BoolExpr -> BoolExpr
 unpackPair v1 v2 te be | Just subst1 <- findReplacer v1 be
                        , Just subst2 <- findReplacer v2 be
 		       = subst1. subst2 $ (pair v1 v2 `equal` te) `aand` be
