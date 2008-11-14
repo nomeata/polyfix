@@ -1,4 +1,4 @@
-module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,TermCont,TermPlus,PlusElem(..),AbsTerm(..),testTerm,getTerm,getComplete,showTerm,showUsedTermCont,getCompleteRaw,getWithDebug,getIt) where
+module ExFindExtended (TypVar(..),Typ(..),TermVar(..),Term,TermCont,TermPlus,PlusElem(..),AbsTerm(..),testTerm,getTerm,getComplete,showTerm,showUsedTermCont,getCompleteRaw,getWithDebug,getIt,showTyp,printTyp) where
 
 import Prelude hiding (Either(..))
 import qualified Prelude as E (Either(..))
@@ -7,10 +7,141 @@ import qualified Data.Map as Map
 import Control.Monad
 import M
 import ParseType
---import Debug.Trace
-trace string a = a
--- newInt :: M Int
--- runM :: M a -> a
+
+-- * Debugging options
+--------------------------DEBUG-TOOLS---------------------------------------------------------
+import System.IO.Unsafe
+-- |set debugging functions from the below list
+trace :: String -> a -> a
+trace = trace_ignore
+--trace = trace_2shell
+
+---- OutputFile options ----
+--traceIOStart = traceIOStart_makeFile
+-- |set file where debug output of traceIO is send to
+traceIOStart = traceIOStart_ignore
+traceIOFile = "./traceIO.log.hs"
+
+---- traceIO settings ----
+-- | trace informations on every rule, gives context and typ before and after rule application
+-- exception: RFix and AX*
+traceIO :: String -> Typ -> Cont -> Typ -> Cont -> a -> a
+traceIO = traceIO_ignore
+--traceIO = traceIO_ordDiff
+--traceIO = traceIO_ord2shell
+--traceIO = traceIO_checkOrderInc
+--traceIO = traceIO_cont2shell
+
+---- show settings ---
+showContTrace = showCont
+
+
+---- trace functions ----
+
+---- output file variants ----
+traceIOStart_ignore file a = a
+traceIOStart_makeFile file a = if unsafePerformIO (writeFile traceIOFile "traceIO-File\n\n") == () then a else a
+
+---- trace and traceIO variants ----
+trace_ignore str a = a
+trace_toShell str a = if unsafePerformIO (putStr str) == () then a else a
+
+traceIO_ignore rule tauIn gammaIn tauOut gammaOut a = a
+
+traceIOOutPut rule tauIn gammaIn tauOut gammaOut ordDiff =
+    unsafePerformIO (appendFile traceIOFile (rule ++ ":\n\tIN  Type: " ++ (showTyp tauIn) ++ "\n\tIN  Cont: " ++ (showContTrace gammaIn) ++ "\n\tOUT Type: " ++ (showTyp tauOut) ++ "\n\tOUT Cont: " ++ (showContTrace gammaOut) ++"\n\tOrder Difference: " ++ (show ordDiff) ++ "\n"))
+
+--traceIO variants
+--outputs a file with input and output types, contexts and the orderdifference (out - in) for every rule applied
+traceIO_ordDiff rule tauIn gammaIn tauOut gammaOut a = 
+    let (ordIn,ordOut) = makeSameLength (count gammaIn tauIn) (count gammaOut tauOut)
+        ordDiff = zipWith (-) ordOut ordIn
+	good = firstNegative ordDiff
+    in
+    if (if traceIOOutPut rule tauIn gammaIn tauOut gammaOut ordDiff == () then good else good)
+    then a
+    else error ("Order increased by Rule " ++ rule ++ "\n\tInput Type: " ++ (showTyp tauIn) ++ "\n\tInput Cont: " ++ (show gammaIn) ++ "\n\tOutPut Type: " ++ (showTyp tauOut) ++ "\n\tOutput Cont: " ++ (show gammaOut) ++ "\n" ++ "OrderDifference: " ++ (show ordDiff)) 
+
+--outputs pairs of input order ander output order to the shell
+traceIO_ord2shell rule tauIn gammaIn tauOut gammaOut a =
+    let (ordIn,ordOut) = makeSameLength (count gammaIn tauIn) (count gammaOut tauOut) in
+    if unsafePerformIO (putStr ((show ordIn) ++ "\n" ++ (show ordOut) ++ "\n\n")) == () then a else a
+
+--outputs context before and after rule application to the shell
+traceIO_cont2shell rule tauIn gammaIn tauOut gammaOut a =
+    if unsafePerformIO (putStr (rule ++ ":\n" ++ (showContTrace gammaIn) ++ "\n" ++ (showContTrace gammaOut) ++ "\n\n")) == () then a else a
+
+--stay calm until order increases during a rule and then throw an error
+traceIO_checkOrderInc rule tauIn gammaIn tauOut gammaOut a =
+    let (ordIn,ordOut) = makeSameLength (count gammaIn tauIn) (count gammaOut tauOut) 
+	ordDiff = zipWith (-) ordOut ordIn in
+    if firstNegative ordDiff 
+    then a
+    else error ("Order increased by Rule " ++ rule ++ "\n\tInput Type: " ++ (showTyp tauIn) ++ "\n\tInput Cont: " ++ (show gammaIn) ++ "\n\tOutPut Type: " ++ (showTyp tauOut) ++ "\n\tOutput Cont: " ++ (show gammaOut) ++ "\n" ++ "OrderDifference: " ++ (show ordDiff))
+
+--helpfunctions
+zeros = 0:zeros
+
+updateAt l idx elem = (take idx l) ++ (elem:(drop (idx+1) l))
+
+getAt l idx = head (drop idx l)
+
+makeSameLength l1 l2 = let len1 = length l1
+			   len2 = length l2 in
+                       if len1 < len2 
+		       then (prependZeros len2 l1,l2)
+		       else (l1,prependZeros len1 l2)
+  where prependZeros len l = if length l < len
+			     then prependZeros len (0:l)
+			     else l
+
+count gamma tau = let (l1,l2) = makeSameLength (countCont gamma) ((countTyp tau) ++ [0]) in
+	          zipWith (+) l1 l2
+
+countCont :: Cont -> [Int]
+countCont gamma = 
+    let varlist = ((vars gamma) ++ (varsStar gamma)) in
+    (countCont' varlist) ++ [(length varlist)]
+
+countCont' vl = 
+    case vl of
+    []   -> [0,0,0,0,0]
+    x:xs -> let (l1,l2) = makeSameLength (countCont' xs) (countTyp (snd x)) in
+            zipWith (+) l1 l2
+
+countTyp :: Typ -> [Int]
+countTyp tau = let (d,el,ol) = countTyp' tau 0 in
+	       (reverse (take (d+1) el)) ++ ol
+ 
+--           tau    depth eitherlist (maxdepth,(eitherlist,orderlist))
+countTyp' :: Typ -> Int -> (Int,[Int],[Int])
+countTyp' tau depth = 
+    case tau of
+    TVar _            -> (depth,zeros,[0,0,0,0])
+    Arrow tau1 tau2   -> let (d1,el1,ol1) = countTyp' tau1 (depth+1)
+			     (d2,el2,ol2) = countTyp' tau2 (d1+1) in
+			 (max d1 d2, zipWith (+) el1 el2, zipWith (+) (zipWith (+) [0,0,0,1] ol1) ol2)
+    All _ tau1        -> let (d,el,ol) = countTyp' tau1 (depth+1) in
+			 (d,el,zipWith (+) [1,0,0,0] ol)
+    AllStar _ tau1    -> let (d,el,ol) = countTyp' tau1 (depth+1) in
+			 (d,el,zipWith (+) [1,0,0,0] ol)
+    List tau1         -> let (d,el,ol) = countTyp' tau1 (depth+1) in
+			 (d,el,zipWith (+) [0,0,1,0] ol)
+    Int               -> (depth,zeros,[0,0,0,0])
+    TPair tau1 tau2   -> let (d1,el1,ol1) = countTyp' tau1 (depth+1)
+			     (d2,el2,ol2) = countTyp' tau2 (d1+1) in
+			 (max d1 d2,zipWith (+) el1 el2, zipWith (+) (zipWith (+) [0,1,0,0] ol1) ol2)
+    TEither tau1 tau2 -> let (d1,el1,ol1) = countTyp' tau1 (depth+1)
+			     (d2,el2,ol2) = countTyp' tau2 (depth+1) in
+			 (max d1 d2,zipWith (+) (updateAt el1 depth ((getAt el1 depth)+1)) el2, zipWith (+) ol1 ol2)
+
+firstNegative l = case l of
+	          [] -> False
+		  x:xs -> if x == 0 then firstNegative xs
+			  else (if x < 0 then True else False) 
+
+
+--------------------------END: DEBUG-TOOLS----------------------------------------------------
 
 type TypedVar = (TermVar,Typ)
 type TermCont = Map.Map TermVar (TermPlus,TermPlus)
@@ -80,8 +211,8 @@ term2PlusTerm t =
       Pair t1 t2 -> Pair (term2PlusTerm t1) (term2PlusTerm t2)
       PCase t1 v1 v2 t2 -> PCase (term2PlusTerm t1) v1 v2 (term2PlusTerm t2)
       ECase t1 v1 t2 v2 t3 -> ECase (term2PlusTerm t1) v1 (term2PlusTerm t2) v2 (term2PlusTerm t3)
-      Right t1 -> term2PlusTerm t1
-      Left  t1 -> term2PlusTerm t1
+      Right t1 -> Right (term2PlusTerm t1)
+      Left  t1 -> Left (term2PlusTerm t1)
 
 updateTVarStar (Cont tVars tVarsStar vars varsStar) tv = Cont tVars (tv:tVarsStar) vars varsStar
 
@@ -192,7 +323,13 @@ apply f args = case args of
 	        []    -> f
 	        x:xs  -> apply (App f x) xs
 
-subst :: Term -> Term -> TermVar -> Term
+insertArgument :: AbsTerm a -> AbsTerm a -> AbsTerm a
+insertArgument f x = case f of
+		     Abs v _ t                 -> subst t x v
+		     Bottom (Arrow tau1 tau2)  -> Bottom tau2
+		     _ -> error ("unexpected termstructure" ++ (showAbsTerm f))
+
+subst :: AbsTerm a -> AbsTerm a -> TermVar -> AbsTerm a
 subst m new old = case m of
 		   Var var           -> if(var == old) then new else m
 		   Abs v tau m'      -> Abs v tau (subst m' new old)
@@ -208,6 +345,7 @@ subst m new old = case m of
 --                 GoalTerm _ _  -> Subst m new old
 --		   Subst _ _ _   -> Subst m new old
 --		   Alg2 _ _       -> Subst m new old
+		   Case1 m0 m1 m2 m3 -> Case1 (subst m0 new old) (subst m1 new old) (subst m2 new old) (subst m3 new old)
                    _                 -> m
 
 makePlusPair :: Typ -> Maybe (AbsTerm PlusElem, AbsTerm PlusElem)
@@ -252,6 +390,7 @@ makeFuncPair tc gamma resPair resTyp tau terms = makeFuncPair' tc gamma resPair 
 
 makeFuncPair' :: TermCont -> Cont -> (TermPlus,TermPlus) -> Typ -> Typ -> Typ -> ([TermPlus],[TermPlus]) -> (TermPlus,TermPlus) -> M (TermPlus,TermPlus)
 makeFuncPair' tc gamma resPair resTyp tauAll tau args terms =
+    trace ("makeFuncPair' called with\n\ttype : " ++ showTyp tau ++ "\n\tterm1: " ++ (showTermPlus False (fst terms)) ++ "\n\t\term2: " ++ (showTermPlus True (snd terms))) (
     let (z,z') = resPair in
     case tau of
       TVar beta    -> case makePlusPair tau of
@@ -340,16 +479,40 @@ makeFuncPair' tc gamma resPair resTyp tauAll tau args terms =
 								}
 			                        Left t1    -> return (Abs w tauAll (ECase (apply (Var w) (fst args)) x (fst resPair) x (Bottom resTyp)),
 					                              Abs w tauAll (ECase (apply (Var w) (fst args)) x (snd resPair) x (Bottom resTyp)))
+			         App t21 t22 -> let App t11 t12 = fst terms in
+			                        makeFuncPair' tc gamma resPair resTyp tauAll tau args (insertArgument t11 t12, insertArgument t21 t22)
+			         ECase t21 _ _ _ _ -> let ECase t11 _ _ _ _ = fst terms in 
+			                            makeFuncPair' tc gamma resPair resTyp tauAll tau args (t21, t11)
+			         t -> error ("Term has unexpected termstructure " ++ (showTermPlus False t) ++ "as type" ++ (showTyp tau))
 			      }
-      Arrow tau' tau'' -> let Abs x _ t1 = fst terms
-			      t2 = case snd terms of
-				     Abs _ _ t  -> t
-				     Bottom _   -> Bottom tau''
-			      Just (u,u') = if Map.member x tc then Just (fst (trace "Map.!-check: lArrowArrow g-construct fst y (list case Arrow)" (tc Map.! x)),snd (trace "Map.!-check: lArrowArrow g-construct snd y (list case Arrow)" (tc Map.! x)))
-					    else makePlusPair tau'
-                          in
-			  makeFuncPair' tc gamma resPair resTyp tauAll tau'' (u:(fst args),u':(snd args)) (t1,t2)
+--T commented out for testing reasons
+--      Arrow tau' tau'' -> let Abs x _ t1 = fst terms
+--			      t2 = case snd terms of
+--				     Abs _ _ t  -> t
+--				     Bottom _   -> Bottom tau''
+--			      Just (u,u') = if Map.member x tc then Just (fst (trace "Map.!-check: lArrowArrow g-construct fst y (list case Arrow)" (tc Map.! x)),snd (trace "Map.!-check: lArrowArrow g-construct snd y (list case Arrow)" (tc Map.! x)))
+--					    else makePlusPair tau'
+--                          in
+--			  makeFuncPair' tc gamma resPair resTyp tauAll tau'' (u:(fst args),u':(snd args)) (t1,t2)
 
+--T inserted for testing reasons
+      Arrow tau' tau'' -> case fst terms of
+			  Abs x _ t1 -> let t2 = case snd terms of
+				                 Abs _ _ t  -> t
+				                 Bottom _   -> Bottom tau''
+			                    Just (u,u') = if Map.member x tc then Just (fst (trace "Map.!-check: lArrowArrow g-construct fst y (list case Arrow)" (tc Map.! x)),snd (trace "Map.!-check: lArrowArrow g-construct snd y (list case Arrow)" (tc Map.! x)))
+					                  else makePlusPair tau'
+					in
+					makeFuncPair' tc gamma resPair resTyp tauAll tau'' (u:(fst args),u':(snd args)) (t1,t2)
+			  Bottom _  ->  let t2 = Bottom tau''
+					    Just (u,u') = makePlusPair tau'
+					in
+					do{ (_,g') <- makeFuncPair' tc gamma resPair resTyp tauAll tau'' (u:(fst args),u':(snd args)) (t2,t2);
+					    i <- newInt;
+					    let x = TermVar i in
+					    return (Abs x tau' (fst resPair), g')
+					  }
+			      )
 
 -------Regeln der ersten Phase-------------
 
@@ -524,7 +687,7 @@ lEArrow_tc_update tc varIn f = let [g,h] = varIn in
 				      Just (u,u') = if Map.member (fst h) tc then Just (fst (trace "Map.!-check: lEArrow fst h" (tc Map.! (fst h))), snd (trace "Map.!-check: lEArrow snd h" (tc Map.! (fst h))))
 				                    else makePlusPair $ snd h
 				  in
-	  			  return (Map.insert (fst f) (Abs e tau (ECase (Var e) x z y u), Abs e tau (ECase (Var e) x z' y u')) tc)
+	  			  return (Map.insert (fst f) (Abs e tau (ECase (Var e) x (App z (Var x)) y (App u (Var y))), Abs e tau (ECase (Var e) x (App z' (Var x)) y (App u' (Var y)))) tc)
 				 }
 
 ------Regeln mit backtracking -----------------
@@ -810,10 +973,11 @@ lEStar2_tc_update tc y e = let Just (z,z') = if Map.member (fst y) tc then Just 
 
 alg :: Cont -> Typ -> TermCont -> M (Term,TermCont)
 alg gamma tau termCont = do track (makeTrackString "Start Conf" gamma tau)
-			    alg1 gamma tau termCont
+			    (t,tc) <- alg1 gamma tau termCont
+			    return (simplifyAbsTerm t, simplifyTermCont tc)
 
 alg1 :: Cont -> Typ -> TermCont -> M (Term,TermCont)
-alg1 = alg1_RFix
+alg1 = traceIOStart traceIOFile alg1_RFix
 
 alg1_RFix :: Cont -> Typ -> TermCont -> M (Term,TermCont)
 alg1_RFix gamma tau termCont = case rFix gamma tau of
@@ -826,32 +990,32 @@ alg1_RAllStar gamma tau termCont = case rAllStar gamma tau of
 			           Nothing                -> alg1_RAll gamma tau termCont
 			           Just (gamma', tau', f) -> do track (makeTrackString "RAllStar" gamma' tau')
 								(t,c) <- (alg1 gamma' tau' termCont)
-					              	        return (f t, c)
+					              	        traceIO "RAll*" tau gamma tau' gamma' (return (f t, c))
 							      
 alg1_RAll :: Cont -> Typ -> TermCont -> M (Term,TermCont)
 alg1_RAll gamma tau termCont = case rAll gamma tau of
 		               Nothing                -> alg1_LFix gamma tau termCont
 			       Just (gamma', tau', f) -> do track (makeTrackString "RAll" gamma' tau')
 							    (t,c) <- (alg1 gamma' tau' termCont)
-							    return (f t,c)
+							    traceIO "RAll" tau gamma tau' gamma' (return (f t,c))
 		
 alg1_LFix :: Cont -> Typ -> TermCont -> M (Term,TermCont)				     
 alg1_LFix gamma tau termCont = case lFix gamma of
                                Nothing     -> alg1_LInt gamma tau termCont
                                Just gamma' -> do track (makeTrackString "LFix" gamma' tau)
-					         alg1 gamma' tau termCont
+					         traceIO "LFix" tau gamma tau gamma' (alg1 gamma' tau termCont)
 
 alg1_LInt gamma tau termCont = case lInt gamma of
 		               Nothing     -> alg1_RArrow gamma tau termCont
 			       Just gamma' -> do track (makeTrackString "LInt" gamma' tau)
-				                 alg1 gamma' tau termCont
+				                 traceIO "LInt" tau gamma tau gamma' (alg1 gamma' tau termCont)
 
 alg1_RArrow :: Cont -> Typ -> TermCont -> M (Term,TermCont)
 alg1_RArrow gamma tau termCont = case rArrow gamma tau of 
 			         Nothing           -> alg1_RI gamma tau termCont
 			         Just (comp, tau') -> do {(gamma', f) <- comp;
 							  track (makeTrackString "R->" gamma' tau');
-							  (t,c) <- (alg1 gamma' tau' termCont);
+							  (t,c) <- (traceIO "R->" tau gamma tau' gamma' (alg1 gamma' tau' termCont));
 							  return (f t,c)
 							 }
 
@@ -859,7 +1023,7 @@ alg1_RI :: Cont -> Typ -> TermCont -> M (Term,TermCont)
 alg1_RI gamma tau termCont = case rI tau of
                              Nothing        -> alg1_LIArrow gamma tau termCont
                              Just (tau', f) -> do track (makeTrackString "RI" gamma tau')
-						  (t,c) <- (alg1 gamma tau' termCont)
+						  (t,c) <- traceIO "RI" tau gamma tau' gamma (alg1 gamma tau' termCont)
 					          return (f t,c)
 				           
 alg1_LIArrow :: Cont -> Typ -> TermCont -> M (Term,TermCont)
@@ -867,7 +1031,7 @@ alg1_LIArrow gamma tau termCont = case lIArrow gamma of
                                   Nothing   -> alg1_LI gamma tau termCont
 			          Just comp -> do {((gamma',f),(g,k)) <- comp;
 						   track (makeTrackString "LI->" gamma' tau);
-                                                   (t,c) <- (alg1 gamma' tau termCont);
+                                                   (t,c) <- traceIO "LI->" tau gamma tau gamma' (alg1 gamma' tau termCont);
 						   i <- newInt;
 						   j <- newInt;
 						   let l = TermVar i
@@ -880,7 +1044,7 @@ alg1_LI gamma tau termCont = case lI gamma tau of
                              Nothing     -> alg1_LPArrow gamma tau termCont
                              Just comp -> do {((gamma',f),(h,l)) <- comp;
 					      track (makeTrackString "LI" gamma' tau);
-					      (t,c) <- (alg1 gamma' tau termCont);
+					      (t,c) <- traceIO "LI" tau gamma tau gamma' (alg1 gamma' tau termCont);
 					      return (f t, lI_tc_update c h l)
 					     }
 
@@ -888,7 +1052,7 @@ alg1_LPArrow gamma tau termCont = case lPArrow gamma of
 			          Nothing    -> alg1_LP gamma tau termCont
                                   Just comp  -> do {((gamma',f),(g,h)) <- comp;
 						    track(makeTrackString "LP->" gamma' tau);
-						    (t,c) <- (alg1 gamma' tau termCont);
+						    (t,c) <- traceIO "LP->" tau gamma tau gamma' (alg1 gamma' tau termCont);
 						    termCont' <- lPArrow_tc_update c g h;
 						    return (f t, termCont')
 						   }
@@ -897,7 +1061,7 @@ alg1_LP gamma tau termCont = case lP gamma of
 		             Nothing    -> alg1_LEArrow gamma tau termCont
                              Just comp  -> do {((gamma',f),(varIn,p)) <- comp;
 					       track(makeTrackString "LP" gamma' tau);
-					       (t,c) <- (alg1 gamma' tau termCont);
+					       (t,c) <- traceIO "LP" tau gamma tau gamma' (alg1 gamma' tau termCont);
 					       return (f t, lP_tc_update c varIn p)
 					      }
 
@@ -905,7 +1069,7 @@ alg1_LEArrow gamma tau termCont = case lEArrow gamma of
                                   Nothing   -> alg1_LE1 gamma tau termCont
                                   Just comp -> do {((gamma',f),(varIn,g)) <- comp;
 						   track (makeTrackString "LE->" gamma' tau);
-						   (t,c) <- (alg1 gamma' tau termCont);
+						   (t,c) <- traceIO "LE->" tau gamma tau gamma' (alg1 gamma' tau termCont);
 						   termCont' <- lEArrow_tc_update c varIn g;
 						   return (f t, termCont')
 						  }
@@ -915,7 +1079,7 @@ alg1_LE1 gamma tau termCont = case lE1 gamma tau of
 			      Just comp -> do {((gamma',f),(x,e)) <- comp;
 					   let subderivation =
 					           do  track (makeTrackString "LE1" gamma' tau)
-					               (t,c) <- (alg1 gamma' tau termCont);
+					               (t,c) <- traceIO "LE1" tau gamma tau gamma' (alg1 gamma' tau termCont);
 					               return (f t, lE1_tc_update c x e)
 					   in
 					   choice subderivation (alg1_LE2 gamma tau termCont);
@@ -925,7 +1089,7 @@ alg1_LE2 gamma tau termCont = case lE2 gamma tau of
 			      Nothing   -> alg1_RP1 gamma tau termCont --should never be reached
 			      Just comp -> do {((gamma',f),(y,e)) <- comp;
 					       track (makeTrackString "LE2" gamma' tau);
-					       (t,c) <- (alg1 gamma' tau termCont);
+					       (t,c) <- traceIO "LE2" tau gamma tau gamma' (alg1 gamma' tau termCont);
 					       return (f t, lE2_tc_update c y e)
 					      }
 
@@ -933,14 +1097,14 @@ alg1_RP1 gamma tau termCont = case rP1 tau of
                               Nothing        -> alg1_RE1 gamma tau termCont
                               Just (tau', f) -> choice subderivation (alg1_RP2 gamma tau termCont)
 	                                         where subderivation = do {track (makeTrackString "RP1" gamma tau');
-									   (t,c) <- (alg1 gamma tau' termCont);
+									   (t,c) <- traceIO "RP1" tau gamma tau' gamma (alg1 gamma tau' termCont);
 							                   return (f t, c)
 									  }
   
 alg1_RP2 gamma tau termCont = case rP2 tau of
 		              Nothing        -> alg1_RE1 gamma tau termCont
                               Just (tau', f) -> do {track (makeTrackString "RP2" gamma tau');
-						    (t,c) <- (alg1 gamma tau' termCont);
+						    (t,c) <- traceIO "RP2" tau gamma tau' gamma (alg1 gamma tau' termCont);
 					            return (f t,c)
 						   }
 
@@ -948,14 +1112,14 @@ alg1_RE1 gamma tau termCont = case rE1 tau of
                               Nothing        -> alg1_LFixArrowStar gamma tau termCont
                               Just (tau', f) -> choice subderivation (alg1_RE2 gamma tau termCont)
 			                        where subderivation = do {track (makeTrackString "RE1" gamma tau');
-									  (t,c) <- (alg1 gamma tau' termCont);
+									  (t,c) <- traceIO "RE1" tau gamma tau' gamma (alg1 gamma tau' termCont);
 							                  return (f t,c)
 									 }
 									  
 alg1_RE2 gamma tau termCont = case rE2 tau of
 		              Nothing        -> alg1_LFixArrowStar gamma tau termCont
                               Just (tau', f) -> do {track (makeTrackString "RE2" gamma tau');
-						    (t,c) <- (alg1 gamma tau' termCont);
+						    (t,c) <- traceIO "RE2" tau gamma tau' gamma (alg1 gamma tau' termCont);
 					            return (f t,c)
 						   }
 					
@@ -963,7 +1127,7 @@ alg1_LFixArrowStar :: Cont -> Typ -> TermCont -> M (Term, TermCont)
 alg1_LFixArrowStar gamma tau termCont = foldr choice (alg1_LArrowArrow gamma tau termCont) (map trysubderivations (lFixArrowStar gamma))
 			              where trysubderivations = \l -> do {((gamma', f),(y,g)) <- l; 
 									  track (makeTrackString "LFix->*" gamma' tau);
-									  (t,c) <- (alg2 gamma' tau termCont);
+									  (t,c) <- traceIO "LFix->*" tau gamma tau gamma' (alg2 gamma' tau termCont);
 									  i <- newInt;
 									  let x = TermVar i in
 									  do{tc <- lFixArrowStar_tc_update c gamma x y g;
@@ -976,8 +1140,8 @@ alg1_LArrowArrow gamma tau termCont =
      where trysubderivations = \l -> do {(((gamma1, tau1), gamma2, f),([w,y],g)) <- l;
 					 track (makeTrackString "L->-> (fst)" gamma1 tau1);
 					 track (makeTrackString "L->-> (snd)" gamma2 tau);
-					 (t1,c1) <- (alg1 gamma1 tau1 termCont);
-					 (t2,c2) <- (alg2 gamma2 tau termCont);
+					 (t1,c1) <- traceIO "L->-> (fst)" tau gamma tau1 gamma1 (alg1 gamma1 tau1 termCont);
+					 (t2,c2) <- traceIO "L->-> (snd)" tau gamma tau gamma2 (alg2 gamma2 tau termCont);
 					 termCont' <- lArrowArrow_tc_update (Map.union c1 c2) gamma t1 w y g;
 					 return (f t1 t2, termCont')
 					}
@@ -987,7 +1151,7 @@ alg1_LFixArrow gamma tau termCont =
      foldr choice (do {track "LFix->:  !!FAIL!!"; abort}) (map trysubderivations (lFixArrow gamma))
      where trysubderivations = \l -> do {((gamma', f),(x,g)) <- l;
 					 track (makeTrackString "LFix->" gamma' tau);
-					 (t,c) <- (alg1 gamma' tau termCont);
+					 (t,c) <- traceIO "LFix->" tau gamma tau gamma' (alg1 gamma' tau termCont);
 					 i <- newInt;
 					 let z = TermVar i in
 					 return (f t,lFixArrow_tc_update c z x g)
@@ -1011,7 +1175,7 @@ alg2_LaArrowStar1 gamma tau termCont = case laArrowStar1 gamma of
 				       Just (comp) 
 					       -> do {((gamma', f),(varIn,varOut)) <- comp;
 						      track (makeTrackString "La->*1" gamma' tau);
-						      (t,c) <- (alg2 gamma' tau termCont);
+						      (t,c) <- traceIO "La->*1" tau gamma tau gamma' (alg2 gamma' tau termCont);
 						      i <- newInt;
 						      let x = TermVar i in
 						      return (f t, laArrowStar1_tc_update c x varIn varOut)
@@ -1022,7 +1186,7 @@ alg2_LaArrowStar2 gamma tau termCont = case laArrowStar2 gamma of
 				       Nothing   -> alg2_LIStar gamma tau termCont
 				       Just comp -> do {((gamma', f),([x,y],g)) <- comp;
 							track (makeTrackString "La->*2" gamma' tau);
-							(t,c) <- (alg2 gamma' tau termCont);
+							(t,c) <- traceIO "La->*2" tau gamma tau gamma' (alg2 gamma' tau termCont);
 							i <- newInt;
 							let u = TermVar i in
 							do{tc <- laArrowStar2_tc_update c gamma u x y g;
@@ -1035,7 +1199,7 @@ alg2_LIStar gamma tau termCont = case lIStar gamma tau of
                                  Nothing   -> alg2_LPStar gamma tau termCont
 			         Just comp -> do {((gamma', f),(h,l)) <- comp;
 						  track (makeTrackString "LI*" gamma' tau);
-						  (t,c) <- (alg2 gamma' tau termCont);
+						  (t,c) <- traceIO "LI*" tau gamma tau gamma' (alg2 gamma' tau termCont);
 						  return (f t, lIStar_tc_update c h l)
 						 }
 
@@ -1043,7 +1207,7 @@ alg2_LPStar gamma tau termCont = case lPStar gamma of
 			          Nothing   -> alg2_LEStar1 gamma tau termCont
 			          Just comp -> do {((gamma', f),(h,p)) <- comp;
 						   track (makeTrackString "LP*" gamma' tau);
-						   (t,c) <- (alg2 gamma' tau termCont);
+						   (t,c) <- traceIO "LP*" tau gamma tau gamma' (alg2 gamma' tau termCont);
 						   return (f t, lPStar_tc_update c h p)
 						  }
 
@@ -1054,7 +1218,7 @@ alg2_LEStar1 gamma tau termCont = case lEStar1 gamma tau of
 			         Just comp -> do {((gamma',f),(x,e)) <- comp;
 						  let subderivation =
 					                 do {track (makeTrackString "LE*1" gamma' tau);
-					                     (t,c) <- (alg2 gamma' tau termCont);
+					                     (t,c) <- traceIO "LE*1" tau gamma tau gamma' (alg2 gamma' tau termCont);
 							     return (f t, lEStar1_tc_update c x e)
 							    }
 						  in
@@ -1067,7 +1231,7 @@ alg2_LEStar2 gamma tau termCont = case lEStar2 gamma tau of
 						  }
 			          Just comp -> do {((gamma',f),(y,e)) <- comp;
 						   track (makeTrackString "LE*2" gamma' tau);
-						   (t,c) <- (alg2 gamma' tau termCont);
+						   (t,c) <- traceIO "LE*2" tau gamma tau gamma' (alg2 gamma' tau termCont);
 						   return (f t, lEStar2_tc_update c y e)
 						  }
 
@@ -1112,6 +1276,39 @@ getWithDebug tau = do {printTyp tau;
 						 printUsedTermCont result;						 
 						}
 		     }
+
+-- *simplifications
+
+-- |removes App in terms
+simplifyAbsTerm :: AbsTerm a -> AbsTerm a
+simplifyAbsTerm t = 
+    case t of
+    Abs v tau t1          -> Abs v tau (simplifyAbsTerm t1)
+    App (Abs v tau t1) t2 -> subst (simplifyAbsTerm t1) t2 v
+    App (Var v1) t1      -> App (Var v1) (simplifyAbsTerm t1)
+    TAbs v t1             -> TAbs v (simplifyAbsTerm t1)
+    Cons t1 t2            -> Cons (simplifyAbsTerm t1) (simplifyAbsTerm t2)
+    Case t1 t2 v t3       -> Case (simplifyAbsTerm t1) (simplifyAbsTerm t2) v (simplifyAbsTerm t3)
+    Case1 t1 t2 t3 t4     -> Case1 (simplifyAbsTerm t1) (simplifyAbsTerm t2) (simplifyAbsTerm t3) (simplifyAbsTerm t4)
+    Pair t1 t2            -> Pair (simplifyAbsTerm t1) (simplifyAbsTerm t2)
+    PCase t1 v1 v2 t2     -> PCase (simplifyAbsTerm t1) v1 v2 (simplifyAbsTerm t2)
+    ECase t1 v1 t2 v2 t3  -> ECase (simplifyAbsTerm t1) v1 (simplifyAbsTerm t2) v2 (simplifyAbsTerm t3)
+    Right t1              -> Right (simplifyAbsTerm t1)
+    Left t1               -> Left (simplifyAbsTerm t1)
+    Var v                 -> Var v
+    Nil tau               -> Nil tau
+    Bottom tau            -> Bottom tau
+    Zero                  -> Zero
+    Extra a               -> Extra a
+    _                     -> error ("unexpected Term structure during simplification: " ++ (showAbsTerm t))
+
+-- |calls simplifyAbsTerm for all Terms in the TermCont
+simplifyTermCont :: TermCont -> TermCont
+simplifyTermCont c = 
+    let simplifyPair (t1,t2) = (simplifyAbsTerm t1, simplifyAbsTerm t2) in
+    Map.map simplifyPair c    
+
+-- *show and print functions
 
 printUsedTermCont :: (Term, TermCont) -> IO()
 printUsedTermCont p =
@@ -1190,7 +1387,7 @@ showTerm t =
     case t of
     Extra _       -> "ERROR. Extra as Term."
     Case1 _ _ _ _ -> "ERROR. Case1 as Term."
-    _             -> (showAbsTerm t showTerm)
+    _             -> (showAbsTermAs t showTerm)
 
 showTermPlus :: Bool -> TermPlus -> String
 showTermPlus strip t = 
@@ -1199,11 +1396,11 @@ showTermPlus strip t =
 			    then "(p" ++ (show i) ++ "(" ++ show j ++ "))"
 			    else "(p" ++ (show i) ++ "'(" ++ show j ++ "))"
     _                    -> if strip == False 
-			    then showAbsTerm t (showTermPlus False)
-			    else showAbsTerm t (showTermPlus True )
+			    then showAbsTermAs t (showTermPlus False)
+			    else showAbsTermAs t (showTermPlus True )
 
-showAbsTerm :: (AbsTerm a) -> ((AbsTerm a) -> String) -> String
-showAbsTerm t showTerm = case t of
+showAbsTermAs :: (AbsTerm a) -> ((AbsTerm a) -> String) -> String
+showAbsTermAs t showTerm = case t of
 	       Var (TermVar i)      -> 'x':(show i)
 	       Abs v _ t'           -> "(\\" ++ (showTerm (Var v)) ++ "." ++ (showTerm t') ++ ")"
                App t1 t2            -> "(" ++ (showTerm t1) ++ " " ++ (showTerm t2) ++ ")"
@@ -1219,6 +1416,25 @@ showAbsTerm t showTerm = case t of
 	       ECase t0 v1 t1 v2 t2 -> "(case " ++ showTerm t0 ++ " of { Left(" ++ showTerm (Var v1) ++ ") => " ++ showTerm t1 ++ "; Right(" ++ showTerm (Var v2) ++ ") => " ++ showTerm t2 ++ "})"
                Left t               -> "Left(" ++ showTerm t ++ ")"
                Right t              -> "Right(" ++ showTerm t ++ ")"
+               Zero                 -> "0" 	
+
+showAbsTerm :: (AbsTerm a) -> String
+showAbsTerm t = case t of
+	       Var (TermVar i)      -> 'x':(show i)
+	       Abs v _ t'           -> "(\\" ++ (showAbsTerm (Var v)) ++ "." ++ (showAbsTerm t') ++ ")"
+               App t1 t2            -> "(" ++ (showAbsTerm t1) ++ " " ++ (showAbsTerm t2) ++ ")"
+               Nil _                -> "[]"
+               Cons t1 t2           -> "(" ++ (showAbsTerm t1) ++ ":" ++ (showAbsTerm t2) ++ ")"
+               Case t0 t1 v2 t2     -> "(case " ++ (showAbsTerm t0) ++ " of {[] => " ++ (showAbsTerm t1) ++ "; " ++ showAbsTerm (Var v2) ++ ":_ => " ++ (showAbsTerm t2) ++"})" 
+	       Bottom _             -> "_|_"
+               TAbs (TypVar i) t    -> (showAbsTerm t)
+	       Extra a              -> "No show-function implemented."
+	       Case1 t1 t2 t3 t4    -> "(case " ++ (showAbsTerm t1) ++ " of {" ++ (showAbsTerm t2) ++ " => " ++ (showAbsTerm t3) ++ "; _ => " ++ (showAbsTerm t4) ++ "})"
+               Pair t1 t2           -> "(" ++ showAbsTerm t1 ++ "," ++ showAbsTerm t2 ++ ")"
+	       PCase t0 v1 v2 t1    -> "(case " ++ showAbsTerm t0 ++ " of {(" ++ showAbsTerm (Var v1) ++ "," ++ showAbsTerm (Var v2) ++ ") => " ++ showAbsTerm t1 ++ "})"
+	       ECase t0 v1 t1 v2 t2 -> "(case " ++ showAbsTerm t0 ++ " of { Left(" ++ showAbsTerm (Var v1) ++ ") => " ++ showAbsTerm t1 ++ "; Right(" ++ showAbsTerm (Var v2) ++ ") => " ++ showAbsTerm t2 ++ "})"
+               Left t               -> "Left(" ++ showAbsTerm t ++ ")"
+               Right t              -> "Right(" ++ showAbsTerm t ++ ")"
                Zero                 -> "0" 																			
 
 showTyp :: Typ -> String

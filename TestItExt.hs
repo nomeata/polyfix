@@ -2,6 +2,7 @@ module TestItExt where
 import Test.HUnit
 import ExFindExtended
 import Prelude hiding (Either(..))
+import ParseType (parseType)
 
 -------------------------------------------------------------------------------------------------
 ---TestBeispiele fuer ExFind---------------------------------------------------------------------
