@@ -29,18 +29,7 @@ freeTheorem' e1 e2 (TVar (TypVar i)) = return $
                            (Arrow (TVar (TypInst i False)) (TVar (TypInst i True)))
 	in equal (app tv e1) e2
 
-freeTheorem' e1 e2 (Arrow t1 t2) | isTuple t1 = do
-	-- Create patterns for (possily nested) tuples and only give
-	-- the inner variables names
-	fillTuplevars t1 $ \ vars (tve1, tve2) -> do
---	fillTuplevars False t1 $ \vars1 tve1  -> 
---		fillTuplevars True t1 $ \vars2 tve2  ->  do
-		cond  <- freeTheorem' (tve1) (tve2) t1
-		concl <- freeTheorem' (app e1 tve1) (app e2 tve2) t2
-		return $ condition vars cond concl
-
-	-- No tuple on the left hand side:
-                                 | otherwise  = getSideVars t1 $ \(v1,v2) -> do
+freeTheorem' e1 e2 (Arrow t1 t2) = getSideVars t1 $ \(v1,v2) -> do
 	cond  <- freeTheorem'  v1  v2 t1
 	concl <- freeTheorem' (app e1  v1) (app e2  v2) t2
 	return $ condition [ v1, v2 ] cond concl
@@ -97,15 +86,3 @@ getSideVars :: (MonadReader [Int] m) => Typ -> ((TypedExpr,TypedExpr) -> m a) ->
 getSideVars t a = getVars 1 $ \[v] ->
 		a (typedLeft  (Var (FromParam v False)) t,
                    typedRight (Var (FromParam v True))  t)
-
--- Given a (nested) tuple type, generates vars for each place
--- and returns them, once as list and onces as one (nested) tuple
-fillTuplevars :: (MonadReader [Int] m) =>
-                 Typ -> ([TypedExpr] -> (TypedExpr,TypedExpr) -> m a) -> m a
-fillTuplevars t@(TPair t1 t2) a = do
-	fillTuplevars t1 $ \vars1 (l1,l2)  ->
-		fillTuplevars t2 $ \vars2 (r1,r2) ->
-			a (vars1 ++ vars2) (pair l1 r1, pair l2 r2)
-
-fillTuplevars t a = getSideVars t $ \(v1,v2) ->
-			a [v1,v2] (v1,v2)
