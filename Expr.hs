@@ -178,8 +178,9 @@ beTrue = And []
 
 -- | Optimize a forall condition
 condition :: [TypedExpr] -> BoolExpr -> BoolExpr -> BoolExpr
--- empty variable list
-condition [] cond concl   = concl
+-- empty condition
+condition [] cond concl   | cond == beTrue
+                          = concl
 -- float out conditions on the right
 condition vars cond (Condition vars' cond' concl')
 			  = condition (vars ++ vars') (cond `aand` cond') concl'
