@@ -92,7 +92,7 @@ unpackPair v1 v2 te be | Just subst1 <- findReplacer v1 be
 		       = subst1. subst2 $ (pair v1 v2 `equal` te) `aand` be
 
 -- | Don’t unpack pair if vars are not used
-unpackPair v1 v2 te be | not (v1 `occursIn` be || v2 `occursIn` be)
+unpackPair v1 v2 te be | not (unTypeExpr v1 `occursIn` be || unTypeExpr v2 `occursIn` be)
                        = be
 -- | If the whole tuple is a function, we can replace this
 --   by a comparison
