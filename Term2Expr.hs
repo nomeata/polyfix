@@ -78,11 +78,12 @@ absTerm2Expr ex (T.ECase e vl el vr er)
                                    (absTerm2Expr ex e)
 absTerm2Expr ex (T.Right t)     = ERight (absTerm2Expr ex t)
 absTerm2Expr ex (T.Left  t)     = ELeft (absTerm2Expr ex t)
-absTerm2Expr ex (T.PCase pt v1 v2 e) = Uncurry `app'`
+absTerm2Expr ex (T.PCase pt v1 v2 e) = app' (app'
+				Uncurry
 				(lambda' (E.Var (termVar2EVar v1))
                                          (lambda' (E.Var (termVar2EVar v2))
-                                                  (absTerm2Expr ex e)))
-                                `app'` (absTerm2Expr ex pt)
+                                                  (absTerm2Expr ex e))))
+                                (absTerm2Expr ex pt)
 
 termVar2EVar (T.TermVar i) = E.FromTypVar i
 

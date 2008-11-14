@@ -299,6 +299,8 @@ app te1 te2 | otherwise                          = error $ "Type mismatch in app
 app' :: Expr -> Expr -> Expr
 app' (App HeadMap f) Bottom                 = Bottom
 app' (App HeadMap f) (Singleton e)          = app' f e
+app' (App Uncurry _) Bottom                 = Bottom
+app' (App Uncurry f) (Pair v1 v2)           = f `app'` v1 `app'` v2
 app' (App (App EitherMap f1) f2) Bottom     = Bottom
 app' (App (App EitherMap f1) f2) (ELeft v)  = ELeft (app' f1 v)
 app' (App (App EitherMap f1) f2) (ERight v) = ERight (app' f2 v)
