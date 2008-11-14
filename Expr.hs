@@ -36,6 +36,7 @@ data Expr
 	| ERight Expr
 	| CaseUnit Expr Expr
 	| EitherMap
+	| Uncurry
 	| HeadMap
 	| EUnit
 	| Singleton Expr
@@ -412,6 +413,7 @@ instance Show Expr where
 					showsPrec 11 t2
 	showsPrec _ EitherMap     = showString "eitherMap"
 	showsPrec _ HeadMap       = showString "headMap"
+	showsPrec _ Uncurry       = showString "uncurry"
 	showsPrec _ Bottom        = showString "_|_"
 
 showIntercalate :: ShowS -> [ShowS] -> ShowS
