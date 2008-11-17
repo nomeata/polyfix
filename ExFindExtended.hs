@@ -428,8 +428,9 @@ makeFuncPair' tc gamma resPair resTyp tauAll tau args terms =
 				       (g,g') <- makeFuncPair' tc gamma resPair resTyp tauAll tau' ([],[]) (x,y);
 				       let w   = TermVar i
 				           u   = TermVar j in
-				       return (Abs w tauAll (Case1 (apply (Var w) (fst args)) (Cons (Var u) (Nil tau')) (App g  (Var u)) z),
-					       Abs w tauAll (Case1 (apply (Var w) (snd args)) (Cons (Var u) (Nil tau')) (App g' (Var u)) z'))
+				       return (Abs w tauAll (Case (apply (Var w) (fst args)) z u (App g  (Var u))),
+					       Abs w tauAll (Case (apply (Var w) (snd args)) z' u (App g' (Var u))))
+
 				      }
   
       TPair tau' tau'' -> case snd terms of
