@@ -168,6 +168,8 @@ data AbsTerm a  = Var TermVar
 --	    | TApp    Term    Typ       -- nie benutzt
 	    | Nil     Typ
 	    | Cons    (AbsTerm a) (AbsTerm a) 
+	    -- |Case statement for lists
+            --  Case l t1 v t2 <==> Case l of {[] => t1; v:_ => t2}
 	    | Case    (AbsTerm a) (AbsTerm a) TermVar     (AbsTerm a)
 	    | Bottom  Typ               -- statt Fix
 --	    | GoalTerm Cont Typ         -- nur temporaer
@@ -175,12 +177,18 @@ data AbsTerm a  = Var TermVar
 --	    | Alg2     Cont Typ --nur temporaer
 --          Erweiterung fuer die Beispielkonstruktion
             | Extra    a 
-	    -- case    x       of {y        ->  z;     _ -> w}
+            -- |general case-statement
+            -- Case1 t0 t1 t2 t3 <==> Case t0 of {t1 => t2; _ => t3}
+	    -- only used with t2 = t3 to force strictness, mostly on ()
 	    | Case1    (AbsTerm a) (AbsTerm a)  (AbsTerm a) (AbsTerm a)
 ------------Erweiterung fuer Extended Algorithmus
 	    | Zero
 	    | Pair     (AbsTerm a) (AbsTerm a)
+            -- |case-statement for pairs
+            -- PCase p v1 v2 t <==> Case p of {(v1,v2) ==> t}
 	    | PCase    (AbsTerm a) TermVar      TermVar     (AbsTerm a)
+            -- |case-statement for either
+            -- ECase e v1 t1 v2 t2 <==> Case e of {Left(v1) => t1; Right(v2) => t2}
 	    | ECase    (AbsTerm a) TermVar      (AbsTerm a) TermVar     (AbsTerm a)
 	    | Right    (AbsTerm a)
 	    | Left     (AbsTerm a)
