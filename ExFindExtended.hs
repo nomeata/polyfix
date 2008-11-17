@@ -1293,22 +1293,35 @@ simplifyAbsTerm :: AbsTerm a -> AbsTerm a
 simplifyAbsTerm t = 
     case t of
     Abs v tau t1          -> Abs v tau (simplifyAbsTerm t1)
-    App (Abs v tau t1) t2 -> subst (simplifyAbsTerm t1) t2 v
-    App (Var v1) t1      -> App (Var v1) (simplifyAbsTerm t1)
+    App t1 t2             -> let t1' = simplifyAbsTerm t1 in
+			     case t1' of
+                             Bottom _       -> Bottom Int -- !!!we don't know the type here, it is NOT Int in most cases, just set because its unimportant (not shown anymore)
+			     Abs v tau t1'' -> subst t1'' (simplifyAbsTerm t2) v
+--			     Var _          -> App t1' (simplifyAbsTerm t2)
+--                           App _ _        -> App t1' (simplifyAbsTerm t2)
+			     --case-statements can appear.
+			     _              -> App t1' (simplifyAbsTerm t2)
     TAbs v t1             -> TAbs v (simplifyAbsTerm t1)
     Cons t1 t2            -> Cons (simplifyAbsTerm t1) (simplifyAbsTerm t2)
     Case t1 t2 v t3       -> Case (simplifyAbsTerm t1) (simplifyAbsTerm t2) v (simplifyAbsTerm t3)
     Case1 t1 t2 t3 t4     -> Case1 (simplifyAbsTerm t1) (simplifyAbsTerm t2) (simplifyAbsTerm t3) (simplifyAbsTerm t4)
     Pair t1 t2            -> Pair (simplifyAbsTerm t1) (simplifyAbsTerm t2)
-    PCase t1 v1 v2 t2     -> PCase (simplifyAbsTerm t1) v1 v2 (simplifyAbsTerm t2)
-    ECase t1 v1 t2 v2 t3  -> ECase (simplifyAbsTerm t1) v1 (simplifyAbsTerm t2) v2 (simplifyAbsTerm t3)
+    PCase t1 v1 v2 t2     -> case simplifyAbsTerm t1 of
+			     Pair t11 t12 -> simplifyAbsTerm (subst (subst t2 t11 v1) t12 v2)
+                             Bottom _     -> Bottom Int -- !!!we don't know the type here, it is NOT Int in most cases, just set because its unimportant (not shown anymore)
+			     _            -> PCase (simplifyAbsTerm t1) v1 v2 (simplifyAbsTerm t2)
+    ECase t1 v1 t2 v2 t3  -> case simplifyAbsTerm t1 of
+                             Left t1'  -> simplifyAbsTerm (subst t2 t1' v1)
+			     Right t1' -> simplifyAbsTerm (subst t3 t1' v2) 
+			     Bottom _  -> Bottom Int  -- !!!we don't know the type here, it is NOT Int in most cases, just set because its unimportant (not shown anymore)
+		             _         -> ECase (simplifyAbsTerm t1) v1 (simplifyAbsTerm t2) v2 (simplifyAbsTerm t3)
     Right t1              -> Right (simplifyAbsTerm t1)
     Left t1               -> Left (simplifyAbsTerm t1)
-    Var v                 -> Var v
-    Nil tau               -> Nil tau
-    Bottom tau            -> Bottom tau
+    Var _                 -> t
+    Nil _                 -> t
+    Bottom _              -> t
     Zero                  -> Zero
-    Extra a               -> Extra a
+    Extra _               -> t
     _                     -> error ("unexpected Term structure during simplification: " ++ (showAbsTerm t))
 
 -- |calls simplifyAbsTerm for all Terms in the TermCont
